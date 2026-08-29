@@ -1,0 +1,130 @@
+@import url('https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --surface-0: #f8f9fb;
+  --surface-1: #f1f4f8;
+  --surface-2: #ffffff;
+  --surface-3: #e8edf4;
+  --text-primary: #1a2332;
+  --text-secondary: #3d5068;
+  --text-muted: #7a90a8;
+  --text-accent: #2563eb;
+  --text-danger: #dc2626;
+  --text-success: #16a34a;
+  --text-warning: #92400e;
+  --border: #dce3ed;
+  --border-strong: #c4cdd9;
+  --border-accent: #93c5fd;
+  --border-success: #86efac;
+  --border-warning: #fcd34d;
+  --bg-accent: #eff6ff;
+  --bg-success: #f0fdf4;
+  --bg-warning: #fefce8;
+  --shadow-sm: 0 1px 3px rgba(26,35,50,0.06), 0 1px 2px rgba(26,35,50,0.04);
+  --shadow-md: 0 4px 12px rgba(26,35,50,0.08), 0 2px 4px rgba(26,35,50,0.04);
+  --shadow-lg: 0 8px 24px rgba(26,35,50,0.10), 0 4px 8px rgba(26,35,50,0.06);
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  /* --- Compatibility aliases -------------------------------------------------
+     ValuationPlatform.jsx (imported from the previous codebase) was written
+     against a --color-* token set. Rather than hand-edit 151 call sites in a
+     2100-line trusted component, this project's real tokens above are
+     aliased under the --color-* names so both naming schemes resolve to the
+     same design system. Do not remove — ValuationPlatform.jsx depends on
+     these. New components should use the canonical tokens above, not these
+     aliases. */
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-muted);
+  --color-text-info: var(--text-accent);
+  --color-text-danger: var(--text-danger);
+  --color-text-success: var(--text-success);
+  --color-text-warning: var(--text-warning);
+  --color-background-primary: var(--surface-2);
+  --color-background-secondary: var(--surface-1);
+  --color-background-info: var(--bg-accent);
+  --color-background-success: var(--bg-success);
+  --color-background-warning: var(--bg-warning);
+  --color-border-secondary: var(--border-strong);
+  --color-border-tertiary: var(--border);
+  --color-border-info: var(--border-accent);
+  --color-border-warning: var(--border-warning);
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--surface-0);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font-family: var(--font-sans); }
+input, textarea, select { font-family: var(--font-sans); }
+
+input[type="text"],
+input[type="number"],
+input[type="email"],
+input[type="password"],
+input[type="date"],
+input[type="tel"],
+textarea,
+select {
+  border: 1.5px solid #c4cdd9 !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: #1a2332 !important;
+  padding: 9px 12px !important;
+  font-size: 13px !important;
+  font-family: var(--font-sans) !important;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="date"]:focus,
+input[type="tel"]:focus,
+textarea:focus,
+select:focus {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.15) !important;
+  outline: none !important;
+  background: #ffffff !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #a0b0c4 !important;
+  font-size: 13px;
+}
+
+input[type="text"]:disabled,
+input[type="number"]:disabled,
+select:disabled {
+  background: #f1f4f8 !important;
+  color: #7a90a8 !important;
+  cursor: not-allowed;
+}
+
+button:not(:disabled):hover {
+  filter: brightness(0.94);
+  cursor: pointer;
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--surface-1); }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 10px; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}

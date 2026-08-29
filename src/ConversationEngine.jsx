@@ -1,0 +1,358 @@
+import { useEffect, useRef, useState } from 'react';
+import { supabase } from './supabase';
+import { callAiSearch, stripTags } from './lib/aiSearch';
+
+// ============================================================================
+// ConversationEngine — THE single chat component for the authenticated
+// platform. Every persona (Router, Financial Analyst, Buyer Qualification,
+// V3 Guide, Listings Advisor) renders through this one component; convPhase
+// picks which persona is "live" server-side and which copy/behaviour shows
+// here. Do not create BuyerInterview / AIFinancialAnalyst / any other chat
+// component - critical rule #4.
+// ============================================================================
+
+var RESTORE_TIMEOUT_MS = 3000;
+var MAX_DISCOVERY_DOTS = 6;
+
+var GREETING = "Welcome to BuzinessDeals. I am your AI advisor — tell me whether you're looking to buy, sell, or value a business, and I'll point you in the right direction.";
+
+var PERSONAS = {
+  discovery: { label: 'AI Advisor', icon: 'ti-compass' },
+  analyst: { label: 'Financial Analyst', icon: 'ti-user-check' },
+  buyerQualification: { label: 'Buyer Qualification', icon: 'ti-briefcase' },
+  valuation: { label: 'V3 Guide', icon: 'ti-chart-line' },
+  listings: { label: 'Listings Advisor', icon: 'ti-list-search' },
+};
+
+// Shown once, automatically, whenever convPhase changes - whether the
+// change came from a chat action button or a direct click elsewhere in the
+// platform (e.g. a HomeScreen card). Exact wording for analyst /
+// buyerQualification / valuation is per spec; discovery / listings are
+// reasonable extensions in the same voice since the spec did not give
+// literal text for those two.
+var TRANSITION_MESSAGES = {
+  analyst: 'Starting your financial interview now. I will ask questions about your business one at a time. Watch the right panel update as we go.',
+  buyerQualification: 'Starting your buyer qualification. I will ask 7 questions to build your Acquisition Brief.',
+  valuation: 'Opening the valuation tool on the right. Ask me anything about each section as you fill it in.',
+  listings: "Here are listings that match your profile. Ask me about any of them — price, EBITDA multiple, or deal structure.",
+  discovery: "Back in discovery — tell me what you'd like to do next.",
+};
+
+function normaliseMessage(m) {
+  return { role: m.role === 'user' ? 'user' : 'assistant', text: m.text != null ? m.text : (m.content || '') };
+}
+
+function briefToContext(brief) {
+  if (!brief) return '';
+  if (brief.summary) return brief.summary;
+  var parts = [];
+  if (brief.buyerType) parts.push('Buyer type: ' + brief.buyerType);
+  if (brief.sector && brief.sector.length) parts.push('Sector: ' + brief.sector.join(', '));
+  if (brief.geography && brief.geography.length) parts.push('Geography: ' + brief.geography.join(', '));
+  if (brief.budgetLakhsMin || brief.budgetLakhsMax) parts.push('Budget: Rs. ' + (brief.budgetLakhsMin || 0) + '-' + (brief.budgetLakhsMax || 0) + ' Lakhs');
+  return parts.join(' | ');
+}
+
+export default function ConversationEngine({
+  user,
+  sessionId,
+  brief,
+  // Cumulative analyst-phase state, echoed back to ai-search-v2 each turn so
+  // it never has to re-derive "what's already known" from raw chat history -
+  // see lib/aiSearch.js. Harmless no-ops against the current production
+  // ai-search, which ignores fields it doesn't recognise.
+  extraction: priorExtraction,
+  model: priorModel,
+  convPhase,
+  exchangeCount: exchangeCountProp,
+  onPhaseChange,
+  onExtraction,
+  onBriefComplete,
+  onModelComplete,
+  onAction,
+  onReset,
+  // { text, key } - set by Platform when something outside the chat (e.g. a
+  // listing card's "Ask AI to analyse") wants to hand context back into the
+  // conversation. `key` must change even if `text` repeats, so the same
+  // question can be asked about the same listing twice in a row.
+  injectMessage,
+}) {
+  var messagesSt = useState([]), messages = messagesSt[0], setMessages = messagesSt[1];
+  var inputSt = useState(''), input = inputSt[0], setInput = inputSt[1];
+  var loadingSt = useState(false), loading = loadingSt[0], setLoading = loadingSt[1];
+  var restoringSt = useState(true), restoring = restoringSt[0], setRestoring = restoringSt[1];
+  var exchangeCountSt = useState(exchangeCountProp || 0);
+  var exchangeCount = exchangeCountSt[0], setExchangeCount = exchangeCountSt[1];
+  var lastActionSt = useState(null), lastAction = lastActionSt[0], setLastAction = lastActionSt[1];
+  var pendingPhaseSt = useState(null), pendingPhase = pendingPhaseSt[0], setPendingPhase = pendingPhaseSt[1];
+
+  var scrollRef = useRef(null);
+  var prevPhaseRef = useRef(convPhase);
+  var mountedRef = useRef(true);
+
+  var persona = PERSONAS[convPhase] || PERSONAS.discovery;
+
+  // --- Restore conversation from ai_conversations (3s timeout -> greeting) ---
+  useEffect(function () {
+    mountedRef.current = true;
+    if (!sessionId) {
+      setMessages([{ role: 'assistant', text: GREETING }]);
+      setRestoring(false);
+      return;
+    }
+
+    var settled = false;
+    var timeoutId = setTimeout(function () {
+      if (settled || !mountedRef.current) return;
+      settled = true;
+      setMessages([{ role: 'assistant', text: GREETING }]);
+      setRestoring(false);
+    }, RESTORE_TIMEOUT_MS);
+
+    supabase
+      .from('ai_conversations')
+      .select('messages')
+      .eq('session_id', sessionId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(function (res) {
+        if (settled || !mountedRef.current) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        var loaded = res.data && res.data.messages;
+        if (loaded && loaded.length > 0) {
+          var normalised = loaded.map(normaliseMessage);
+          setMessages(normalised);
+          var assistantTurns = normalised.filter(function (m) { return m.role === 'assistant'; }).length;
+          setExchangeCount(Math.min(assistantTurns, MAX_DISCOVERY_DOTS));
+        } else {
+          setMessages([{ role: 'assistant', text: GREETING }]);
+        }
+        setRestoring(false);
+      }).catch(function () {
+        if (settled || !mountedRef.current) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        setMessages([{ role: 'assistant', text: GREETING }]);
+        setRestoring(false);
+      });
+
+    return function () {
+      mountedRef.current = false;
+      clearTimeout(timeoutId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
+  // --- Explicit-transition-only phase changes: announce, never auto-navigate ---
+  useEffect(function () {
+    if (prevPhaseRef.current === convPhase) return;
+    prevPhaseRef.current = convPhase;
+    if (restoring) return; // don't announce a phase that arrived before restore finished
+    var text = TRANSITION_MESSAGES[convPhase];
+    if (text) {
+      setMessages(function (prev) { return prev.concat([{ role: 'assistant', text: text }]); });
+    }
+    if (convPhase === 'discovery') setExchangeCount(0);
+    setLastAction(null);
+    setPendingPhase(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convPhase, restoring]);
+
+  // --- Auto-scroll, 50ms after every new message (per spec) ---
+  useEffect(function () {
+    var t = setTimeout(function () {
+      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }, 50);
+    return function () { clearTimeout(t); };
+  }, [messages, loading]);
+
+  function sendMessage(text) {
+    var val = (text != null ? text : input).trim();
+    if (!val || loading) return;
+    setInput('');
+    setLastAction(null);
+    setPendingPhase(null);
+
+    var newMessages = messages.concat([{ role: 'user', text: val }]);
+    setMessages(newMessages);
+    setLoading(true);
+
+    var history = newMessages.map(function (m) { return { role: m.role, content: m.text }; });
+
+    callAiSearch({
+      message: val,
+      history: history,
+      userContext: briefToContext(brief),
+      sessionId: sessionId,
+      userId: user ? user.id : null,
+      conversationPhase: convPhase,
+      exchangeCount: exchangeCount,
+      priorExtraction: priorExtraction && Object.keys(priorExtraction).length ? priorExtraction : null,
+      priorModel: priorModel || null,
+      priorBrief: brief || null,
+    }).then(function (data) {
+      if (!mountedRef.current) return;
+      setLoading(false);
+
+      var reply = stripTags(data.reply || "Sorry, I didn't quite catch that — could you rephrase?");
+      setMessages(newMessages.concat([{ role: 'assistant', text: reply }]));
+      setExchangeCount(function (c) { return c + 1; });
+
+      if (data.extraction) onExtraction && onExtraction(data.extraction);
+      if (data.model) onModelComplete && onModelComplete(data.model);
+      if (data.brief) onBriefComplete && onBriefComplete(data.brief);
+
+      if (data.action && data.action.type) setLastAction(data.action);
+      if (data.nextPhase && data.nextPhase !== convPhase) setPendingPhase(data.nextPhase);
+    }).catch(function () {
+      if (!mountedRef.current) return;
+      setLoading(false);
+      setMessages(newMessages.concat([{ role: 'assistant', text: 'Something went wrong reaching the AI advisor. Please try again in a moment.' }]));
+    });
+  }
+
+  // --- External context injection (listing click -> chat) -----------------
+  var lastInjectKeyRef = useRef(null);
+  useEffect(function () {
+    if (!injectMessage || !injectMessage.text) return;
+    if (lastInjectKeyRef.current === injectMessage.key) return;
+    lastInjectKeyRef.current = injectMessage.key;
+    if (restoring) return;
+    sendMessage(injectMessage.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [injectMessage, restoring]);
+
+  function handleTransitionClick() {
+    if (lastAction && lastAction.type) onAction && onAction(lastAction.type);
+    if (pendingPhase) onPhaseChange && onPhaseChange(pendingPhase);
+    setLastAction(null);
+    setPendingPhase(null);
+  }
+
+  function handleClear() {
+    setMessages([{ role: 'assistant', text: GREETING }]);
+    setInput('');
+    setExchangeCount(0);
+    setLastAction(null);
+    setPendingPhase(null);
+    onReset && onReset();
+  }
+
+  return (
+    <div style={{
+      width: '35%', flexShrink: 0, minWidth: '300px', height: '100%', display: 'flex', flexDirection: 'column',
+      background: 'linear-gradient(180deg, #0f172a, #1e293b)',
+    }}>
+      {/* Header */}
+      <div style={{ padding: '16px 18px 14px', borderBottom: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: convPhase === 'discovery' ? '10px' : 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ width: '32px', height: '32px', borderRadius: '9px', background: 'rgba(37,99,235,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <i className={'ti ' + persona.icon} aria-hidden="true" style={{ fontSize: '16px', color: '#93c5fd' }} />
+            </div>
+            <div>
+              <p style={{ fontSize: '13px', fontWeight: '600', color: '#fff', margin: 0 }}>{persona.label}</p>
+              <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)', margin: 0 }}>buzinessdeals.com</p>
+            </div>
+          </div>
+          {messages.length > 1 && (
+            <button onClick={handleClear} title="Clear conversation" style={{
+              fontSize: '11px', color: 'rgba(255,255,255,0.5)', background: 'transparent',
+              border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer',
+            }}>Clear</button>
+          )}
+        </div>
+        {convPhase === 'discovery' && (
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {Array.from({ length: MAX_DISCOVERY_DOTS }).map(function (_, i) {
+              return <span key={i} style={{
+                width: '5px', height: '5px', borderRadius: '50%',
+                background: i < exchangeCount ? '#60a5fa' : 'rgba(255,255,255,0.18)',
+              }} />;
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Messages */}
+      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 18px' }}>
+        {restoring ? (
+          <div style={{ display: 'flex', gap: '4px', padding: '4px 0' }}>
+            {[0, 1, 2].map(function (i) {
+              return <span key={i} style={{
+                width: '5px', height: '5px', borderRadius: '50%', background: 'rgba(255,255,255,0.4)',
+                animation: 'pulse 1.2s infinite', animationDelay: (i * 0.2) + 's',
+              }} />;
+            })}
+          </div>
+        ) : (
+          messages.map(function (m, i) {
+            var isUser = m.role === 'user';
+            return (
+              <div key={i} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: '10px' }}>
+                <div style={{
+                  maxWidth: '88%', padding: '10px 14px', borderRadius: isUser ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
+                  fontSize: '13px', lineHeight: '1.55', whiteSpace: 'pre-wrap',
+                  background: isUser ? '#2563eb' : 'rgba(255,255,255,0.08)', color: '#fff',
+                }}>{m.text}</div>
+              </div>
+            );
+          })
+        )}
+
+        {loading && (
+          <div style={{ display: 'flex', gap: '4px', padding: '4px 14px' }}>
+            {[0, 1, 2].map(function (i) {
+              return <span key={i} style={{
+                width: '5px', height: '5px', borderRadius: '50%', background: 'rgba(255,255,255,0.6)',
+                animation: 'pulse 1.2s infinite', animationDelay: (i * 0.2) + 's',
+              }} />;
+            })}
+          </div>
+        )}
+
+        {(lastAction || pendingPhase) && !loading && (
+          <div style={{ marginTop: '4px' }}>
+            <button onClick={handleTransitionClick} style={{
+              background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px',
+              padding: '10px 16px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
+            }}>{(lastAction && lastAction.label) || 'Continue →'}</button>
+          </div>
+        )}
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: '14px 18px 18px', borderTop: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.08)',
+          border: '1px solid rgba(255,255,255,0.15)', borderRadius: '999px', padding: '4px 4px 4px 16px',
+        }}>
+          <input
+            type="text"
+            value={input}
+            disabled={restoring}
+            onChange={function (e) { setInput(e.target.value); }}
+            onKeyDown={function (e) { if (e.key === 'Enter') sendMessage(); }}
+            placeholder="Type your message..."
+            style={{
+              flex: 1, border: 'none', outline: 'none', background: 'transparent', color: '#fff',
+              fontSize: '13px', padding: '9px 0',
+            }}
+          />
+          <button
+            onClick={function () { sendMessage(); }}
+            disabled={restoring || loading || !input.trim()}
+            style={{
+              width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0, border: 'none',
+              background: restoring || loading || !input.trim() ? 'rgba(255,255,255,0.15)' : '#2563eb', color: '#fff',
+              cursor: restoring || loading || !input.trim() ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px',
+            }}
+          >→</button>
+        </div>
+      </div>
+    </div>
+  );
+}

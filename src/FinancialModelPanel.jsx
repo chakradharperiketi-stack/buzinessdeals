@@ -1,0 +1,178 @@
+// RightPanel view for convPhase === 'analyst'.
+// Renders live from convExtraction (updated after every AI response, per
+// the Financial Analyst persona's EXTRACTION tag) and convModel (populated
+// once all 13 questions are answered and the MODEL tag fires). Pure
+// presentational component - no chat, no network calls; Platform.jsx owns
+// the data and passes it down.
+
+function fmtLakhs(v) {
+  if (v == null || v === '' || isNaN(v) || Number(v) === 0) return null;
+  return 'Rs. ' + Number(v).toLocaleString('en-IN') + ' L';
+}
+function fmtDays(v) {
+  if (v == null || v === '' || isNaN(v) || Number(v) === 0) return null;
+  return Number(v) + ' days';
+}
+function fmtPct(v) {
+  if (v == null || v === '' || isNaN(v)) return null;
+  return Number(v) + '%';
+}
+function fmtText(v) {
+  if (!v) return null;
+  return String(v);
+}
+function fmtYears(v) {
+  if (v == null || v === '' || isNaN(v) || Number(v) === 0) return null;
+  return Number(v) + ' yrs';
+}
+
+// Builds the five sections' rows from whichever data we have (partial
+// convExtraction mid-interview, or the completed convModel). Dynamic list
+// rows (revenue segments, cost line items) expand to one row per item so
+// the panel visibly grows as the interview progresses - the same "watch it
+// fill in live" behaviour the spec describes.
+function buildSections(data) {
+  var bp = (data && data.businessProfile) || {};
+  var rev = (data && data.revenue) || {};
+  var cogs = (data && data.cogs) || {};
+  var opex = (data && data.opex) || {};
+  var wc = (data && data.workingCapital) || {};
+  var assets = (data && data.assets) || {};
+  var funding = (data && data.funding) || {};
+
+  var revenueRows = (rev.segments || []).map(function (s, i) {
+    var label = s.product || 'Revenue segment ' + (i + 1);
+    var val = s.monthlyRevenue || (s.monthlyQty || 0) * (s.pricePerUnit || 0);
+    return { label: label, value: fmtLakhs(val ? val * 12 / 100000 : 0) || (val ? 'Rs. ' + Math.round(val * 12).toLocaleString('en-IN') : null), confirmed: !!val };
+  });
+
+  var cogsRows = (cogs.lineItems || []).map(function (l, i) {
+    return { label: l.item || 'Direct cost ' + (i + 1), value: l.monthlyAmount ? 'Rs. ' + Math.round(l.monthlyAmount * 12).toLocaleString('en-IN') + '/yr' : null, confirmed: !!l.monthlyAmount };
+  });
+  var opexRows = (opex.lineItems || []).map(function (l, i) {
+    return { label: l.item || 'Operating expense ' + (i + 1), value: l.monthlyAmount ? 'Rs. ' + Math.round(l.monthlyAmount * 12).toLocaleString('en-IN') + '/yr' : null, confirmed: !!l.monthlyAmount };
+  });
+
+  return [
+    {
+      key: 'overview', title: 'Business overview',
+      rows: [
+        { label: 'Business name', value: fmtText(bp.name), confirmed: !!bp.name },
+        { label: 'Sector', value: fmtText(bp.sector), confirmed: !!bp.sector },
+        { label: 'Business type', value: fmtText(bp.businessType), confirmed: !!bp.businessType },
+        { label: 'Years operating', value: fmtYears(bp.yearsOperating), confirmed: !!bp.yearsOperating },
+      ],
+    },
+    {
+      key: 'revenue', title: 'Revenue build-up',
+      rows: revenueRows.concat([
+        { label: 'Annual revenue', value: fmtLakhs(rev.annualTotal), confirmed: !!rev.annualTotal },
+        { label: 'Collection days', value: fmtDays(rev.collectionDays), confirmed: !!rev.collectionDays },
+      ]),
+    },
+    {
+      key: 'costs', title: 'Cost structure',
+      rows: cogsRows.concat(opexRows).concat([
+        { label: 'Total direct costs', value: fmtLakhs(cogs.annualTotal), confirmed: !!cogs.annualTotal },
+        { label: 'Total operating expenses', value: fmtLakhs(opex.annualTotal), confirmed: !!opex.annualTotal },
+      ]),
+    },
+    {
+      key: 'wc', title: 'Working capital',
+      rows: [
+        { label: 'Receivable days', value: fmtDays(wc.receivableDays), confirmed: !!wc.receivableDays },
+        { label: 'Payable days', value: fmtDays(wc.payableDays), confirmed: !!wc.payableDays },
+        { label: 'Inventory days', value: fmtDays(wc.inventoryDays), confirmed: !!wc.inventoryDays },
+      ],
+    },
+    {
+      key: 'assets', title: 'Assets and funding',
+      rows: [
+        { label: 'Fixed assets (total)', value: fmtLakhs(['building', 'machinery', 'vehicles', 'computers', 'furniture', 'other'].reduce(function (s, k) { return s + (assets[k] || 0); }, 0)), confirmed: ['building', 'machinery', 'vehicles', 'computers', 'furniture', 'other'].some(function (k) { return assets[k]; }) },
+        { label: 'Owner equity', value: fmtLakhs(funding.equity), confirmed: !!funding.equity },
+        { label: 'Term loan outstanding', value: fmtLakhs(funding.termLoanOutstanding), confirmed: funding.termLoanOutstanding != null },
+        { label: 'Working capital loan', value: fmtLakhs(funding.wcLoanUtilised), confirmed: funding.wcLoanUtilised != null },
+      ],
+    },
+  ];
+}
+
+function Row({ label, value, confirmed }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{label}</span>
+      {confirmed && value ? (
+        <span style={{ fontSize: '12px', color: 'var(--text-accent)', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <i className="ti ti-circle-check-filled" aria-hidden="true" style={{ fontSize: '13px', color: 'var(--text-success)' }} />
+          {value}
+        </span>
+      ) : (
+        <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>waiting...</span>
+      )}
+    </div>
+  );
+}
+
+function SectionCard({ title, rows }) {
+  var complete = rows.length > 0 && rows.every(function (r) { return r.confirmed; });
+  return (
+    <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px 16px', marginBottom: '12px', boxShadow: 'var(--shadow-sm)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+        <p style={{ fontSize: '12px', fontWeight: '600', color: complete ? 'var(--text-success)' : 'var(--text-primary)', margin: 0 }}>{title}</p>
+        {complete && <span style={{ fontSize: '11px', color: 'var(--text-success)', fontWeight: '600' }}>✓ Complete</span>}
+      </div>
+      {rows.map(function (r, i) { return <Row key={i} label={r.label} value={r.value} confirmed={r.confirmed} />; })}
+    </div>
+  );
+}
+
+export default function FinancialModelPanel({ extraction, model, onProceed }) {
+  var data = model || extraction;
+  var sections = buildSections(data || {});
+  var allRows = sections.reduce(function (acc, s) { return acc.concat(s.rows); }, []);
+  var confirmedCount = allRows.filter(function (r) { return r.confirmed; }).length;
+  var pct = allRows.length > 0 ? Math.round((confirmedCount / allRows.length) * 100) : 0;
+  var isComplete = !!model;
+
+  if (!data) {
+    return (
+      <div style={{ padding: '32px', maxWidth: '520px', margin: '80px auto 0', textAlign: 'center' }}>
+        <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'var(--bg-accent)', margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <i className="ti ti-report-analytics" aria-hidden="true" style={{ fontSize: '22px', color: 'var(--text-accent)' }} />
+        </div>
+        <h2 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 6px' }}>Financial model builder</h2>
+        <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0, lineHeight: '1.6' }}>
+          Talk to the AI advisor on the left. As you answer, your P&L builds here, section by section.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '28px 32px', maxWidth: '640px', margin: '0 auto' }}>
+      <div style={{ marginBottom: '18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+          <p style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', margin: 0 }}>Financial model progress</p>
+          <span style={{ fontSize: '12px', color: 'var(--text-accent)', fontWeight: '600' }}>{pct}%</span>
+        </div>
+        <div style={{ height: '6px', background: 'var(--surface-1)', borderRadius: '3px', overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: pct + '%', background: 'var(--text-accent)', borderRadius: '3px', transition: 'width 0.4s' }} />
+        </div>
+      </div>
+
+      {sections.map(function (s) { return <SectionCard key={s.key} title={s.title} rows={s.rows} />; })}
+
+      {isComplete && (
+        <div style={{ padding: '16px', background: 'var(--bg-success)', border: '1px solid var(--border-success)', borderRadius: '12px', textAlign: 'center', marginTop: '4px' }}>
+          <p style={{ fontSize: '13px', color: 'var(--text-success)', fontWeight: '500', margin: '0 0 10px' }}>
+            Financial model built from your interview.
+          </p>
+          <button onClick={onProceed} style={{
+            padding: '10px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '500',
+            background: '#16a34a', color: '#fff', border: 'none', cursor: 'pointer',
+          }}>Proceed to valuation →</button>
+        </div>
+      )}
+    </div>
+  );
+}
