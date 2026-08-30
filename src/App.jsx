@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import LandingPage from './LandingPage';
 import Platform from './Platform';
+import ErrorBoundary from './ErrorBoundary';
 
 // sessionId is generated exactly once per browser and never regenerated.
 // Every component that needs it receives it as a prop from here.
@@ -92,7 +93,11 @@ export default function App() {
   }
 
   if (session) {
-    return <Platform user={session.user} sessionId={sessionId} onSignOut={handleSignOut} />;
+    return (
+      <ErrorBoundary>
+        <Platform user={session.user} sessionId={sessionId} onSignOut={handleSignOut} />
+      </ErrorBoundary>
+    );
   }
 
   return <LandingPage sessionId={sessionId} session={null} />;
