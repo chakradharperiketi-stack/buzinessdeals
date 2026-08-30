@@ -97,6 +97,62 @@ function buildSections(data) {
   ];
 }
 
+var MONTHS_SHORT = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
+
+function fmtNum(v) {
+  return Math.round(Number(v) || 0).toLocaleString('en-IN');
+}
+
+// Renders the bottom-up build-up (capacityBuildUp for revenue, staffingBuildUp
+// for cost) as an actual Apr-Mar grid - one row per service line/role, a
+// totals row, computed server-side by ai-search-v2 (never client math). Only
+// renders once the server has actually returned monthlyValues; before that,
+// the plain waiting-list Row above still covers the field.
+function MonthlyGrid({ title, buildUp, lineKey, lineLabelKey }) {
+  if (!buildUp || !Array.isArray(buildUp.monthlyTotal)) return null;
+  var lines = buildUp[lineKey] || [];
+  return (
+    <div style={{ marginTop: '4px', marginBottom: '12px' }}>
+      <p style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', margin: '0 0 6px' }}>{title} (Rs. Lakhs, Apr-Mar)</p>
+      <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: '8px' }}>
+        <table style={{ borderCollapse: 'collapse', fontSize: '11px', minWidth: '620px', width: '100%' }}>
+          <thead>
+            <tr style={{ background: 'var(--surface-1)' }}>
+              <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: '600', color: 'var(--text-secondary)', position: 'sticky', left: 0, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Line</th>
+              {MONTHS_SHORT.map(function (m) {
+                return <th key={m} style={{ textAlign: 'right', padding: '6px 8px', fontWeight: '600', color: 'var(--text-secondary)' }}>{m}</th>;
+              })}
+              <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: '700', color: 'var(--text-accent)', whiteSpace: 'nowrap' }}>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map(function (line, i) {
+              var vals = line.monthlyValues || [];
+              var lineTotal = vals.reduce(function (s, v) { return s + (v || 0); }, 0);
+              return (
+                <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td style={{ padding: '6px 8px', color: 'var(--text-primary)', position: 'sticky', left: 0, background: 'var(--surface-2)', whiteSpace: 'nowrap' }}>{line[lineLabelKey] || 'Line ' + (i + 1)}</td>
+                  {MONTHS_SHORT.map(function (_, mi) {
+                    return <td key={mi} style={{ textAlign: 'right', padding: '6px 8px', color: 'var(--text-secondary)' }}>{fmtNum(vals[mi])}</td>;
+                  })}
+                  <td style={{ textAlign: 'right', padding: '6px 8px', fontWeight: '600', color: 'var(--text-primary)' }}>{fmtNum(lineTotal)}</td>
+                </tr>
+              );
+            })}
+            <tr style={{ borderTop: '2px solid var(--border)' }}>
+              <td style={{ padding: '6px 8px', fontWeight: '700', color: 'var(--text-accent)', position: 'sticky', left: 0, background: 'var(--surface-2)', whiteSpace: 'nowrap' }}>Total</td>
+              {buildUp.monthlyTotal.map(function (v, mi) {
+                return <td key={mi} style={{ textAlign: 'right', padding: '6px 8px', fontWeight: '700', color: 'var(--text-accent)' }}>{fmtNum(v)}</td>;
+              })}
+              <td style={{ textAlign: 'right', padding: '6px 8px', fontWeight: '700', color: 'var(--text-accent)' }}>{fmtNum(buildUp.annualTotal)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function Row({ label, value, confirmed }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
@@ -160,7 +216,15 @@ export default function FinancialModelPanel({ extraction, model, onProceed }) {
         </div>
       </div>
 
-      {sections.map(function (s) { return <SectionCard key={s.key} title={s.title} rows={s.rows} />; })}
+      {sections.map(function (s) {
+        return (
+          <div key={s.key}>
+            <SectionCard title={s.title} rows={s.rows} />
+            {s.key === 'revenue' && <MonthlyGrid title="Revenue build-up by service line" buildUp={data && data.capacityBuildUp} lineKey="serviceLines" lineLabelKey="name" />}
+            {s.key === 'costs' && <MonthlyGrid title="Staffing cost by role" buildUp={data && data.staffingBuildUp} lineKey="roles" lineLabelKey="role" />}
+          </div>
+        );
+      })}
 
       {isComplete && (
         <div style={{ padding: '16px', background: 'var(--bg-success)', border: '1px solid var(--border-success)', borderRadius: '12px', textAlign: 'center', marginTop: '4px' }}>
