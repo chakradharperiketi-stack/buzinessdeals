@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ValuationPlatform } from './ValuationPlatform';
 import ConversationEngine from './ConversationEngine';
 import FinancialModelPanel from './FinancialModelPanel';
@@ -159,15 +159,64 @@ function RightPanel({ convPhase, user, sellerForm, selEngId, convExtraction, con
   );
 }
 
+// convPhase/convExtraction/convModel/brief/sellerForm/selEngId used to live
+// only in React memory, with nothing to restore them from. ConversationEngine
+// already restores the raw chat TEXT from ai_conversations on remount, but
+// these structured fields (what drives the right panel) had no restore path
+// at all - so a Bolt preview reload from switching tabs/windows (or any full
+// remount) silently dropped back to convPhase='discovery' with an empty
+// panel, even though the chat log itself came back. localStorage, keyed by
+// sessionId, closes that gap for same-browser reloads without needing a
+// schema change; it does not follow the user cross-device the way the
+// Supabase-backed chat history does; that would take carrying this state
+// into ai_conversations too, and hasn't been asked for beyond fixing this.
+var PLATFORM_STATE_PREFIX = 'bd_platform_state_';
+
+function loadPlatformState(sessionId) {
+  if (!sessionId || typeof localStorage === 'undefined') return null;
+  try {
+    var raw = localStorage.getItem(PLATFORM_STATE_PREFIX + sessionId);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function savePlatformState(sessionId, state) {
+  if (!sessionId || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(PLATFORM_STATE_PREFIX + sessionId, JSON.stringify(state));
+  } catch (e) {
+    // best-effort only - storage full/blocked should never break the app
+  }
+}
+
+function clearPlatformState(sessionId) {
+  if (!sessionId || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(PLATFORM_STATE_PREFIX + sessionId);
+  } catch (e) {
+    // no-op
+  }
+}
+
 export default function Platform({ user, sessionId, onSignOut }) {
-  var convPhaseSt = useState('discovery'), convPhase = convPhaseSt[0], setConvPhase = convPhaseSt[1];
-  var convExtractionSt = useState({}), convExtraction = convExtractionSt[0], setConvExtraction = convExtractionSt[1];
-  var convModelSt = useState(null), convModel = convModelSt[0], setConvModel = convModelSt[1];
-  var briefSt = useState(null), brief = briefSt[0], setBrief = briefSt[1];
-  var sellerFormSt = useState(null), sellerForm = sellerFormSt[0], setSellerForm = sellerFormSt[1];
-  var selEngIdSt = useState(null), selEngId = selEngIdSt[0], setSelEngId = selEngIdSt[1];
+  var persisted = loadPlatformState(sessionId) || {};
+  var convPhaseSt = useState(persisted.convPhase || 'discovery'), convPhase = convPhaseSt[0], setConvPhase = convPhaseSt[1];
+  var convExtractionSt = useState(persisted.convExtraction || {}), convExtraction = convExtractionSt[0], setConvExtraction = convExtractionSt[1];
+  var convModelSt = useState(persisted.convModel || null), convModel = convModelSt[0], setConvModel = convModelSt[1];
+  var briefSt = useState(persisted.brief || null), brief = briefSt[0], setBrief = briefSt[1];
+  var sellerFormSt = useState(persisted.sellerForm || null), sellerForm = sellerFormSt[0], setSellerForm = sellerFormSt[1];
+  var selEngIdSt = useState(persisted.selEngId || null), selEngId = selEngIdSt[0], setSelEngId = selEngIdSt[1];
   // Listing-click -> chat context handoff (bidirectional discovery link).
   var injectSt = useState(null), injectMessage = injectSt[0], setInjectMessage = injectSt[1];
+
+  // Persist on every change so a remount (tab switch/away-and-back, preview
+  // reload) restores the panel instead of resetting to Home.
+  useEffect(function () {
+    savePlatformState(sessionId, { convPhase: convPhase, convExtraction: convExtraction, convModel: convModel, brief: brief, sellerForm: sellerForm, selEngId: selEngId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, convPhase, convExtraction, convModel, brief, sellerForm, selEngId]);
 
   var isAdmin = !!(user && user.email && ADMIN_EMAILS.indexOf(user.email.toLowerCase()) !== -1);
 
@@ -178,11 +227,16 @@ export default function Platform({ user, sessionId, onSignOut }) {
   function handleCard(cardKey) {
     if (cardKey === 'sellerDashboard') {
       // Seller dashboard (multiple engagements as cards) ships in a later
-      // step; route into the valuation tool directly for now so "Sell or
-      // Raise Capital" is not a dead end.
+      // step. Route into the financial-interview persona first, not
+      // straight into the valuation form - per the product brief, the AI
+      // must understand the business before any valuation number gets
+      // produced. FinancialModelPanel's onProceed already carries the
+      // user into 'valuation' once the model is built, so this keeps the
+      // one real pipeline (analyst -> valuation) instead of a second,
+      // redundant entry point that skips it.
       setSellerForm(null);
       setSelEngId(null);
-      setConvPhase('valuation');
+      setConvPhase('analyst');
       return;
     }
     if (cardKey === 'valuation') {
@@ -266,6 +320,7 @@ export default function Platform({ user, sessionId, onSignOut }) {
     setBrief(null);
     setSellerForm(null);
     setSelEngId(null);
+    clearPlatformState(sessionId);
   }
 
   return (
