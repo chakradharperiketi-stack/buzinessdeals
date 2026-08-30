@@ -7,8 +7,12 @@
 
 // Lakhs-denominated figures always show 2 decimals - at this scale a whole
 // number hides real precision (Rs. 42 L vs Rs. 42.35 L is a material
-// difference). Plain-rupee figures elsewhere (cogsRows/opexRows below) stay
-// undecimalled on purpose - decimal paise on a rupee amount is not material.
+// difference). Every monetary field the analyst tool records - annualTotal,
+// lineItem monthlyAmount, segment monthlyRevenue - is in Rs Lakhs (see the
+// tool schema in ai-search-v2/index.ts); cogsRows/opexRows/revenueRows below
+// used to assume some of these were plain rupees, which rendered a Rs 2L/mo
+// line item as "Rs. 24/yr" instead of "Rs. 24.00 L/yr" - fixed by running
+// every one of them through fmtLakhs consistently.
 function fmtLakhs(v) {
   if (v == null || v === '' || isNaN(v) || Number(v) === 0) return null;
   return 'Rs. ' + Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' L';
@@ -47,14 +51,14 @@ function buildSections(data) {
   var revenueRows = (rev.segments || []).map(function (s, i) {
     var label = s.product || 'Revenue segment ' + (i + 1);
     var val = s.monthlyRevenue || (s.monthlyQty || 0) * (s.pricePerUnit || 0);
-    return { label: label, value: fmtLakhs(val ? val * 12 / 100000 : 0) || (val ? 'Rs. ' + Math.round(val * 12).toLocaleString('en-IN') : null), confirmed: !!val };
+    return { label: label, value: fmtLakhs(val * 12), confirmed: !!val };
   });
 
   var cogsRows = (cogs.lineItems || []).map(function (l, i) {
-    return { label: l.item || 'Direct cost ' + (i + 1), value: l.monthlyAmount ? 'Rs. ' + Math.round(l.monthlyAmount * 12).toLocaleString('en-IN') + '/yr' : null, confirmed: !!l.monthlyAmount };
+    return { label: l.item || 'Direct cost ' + (i + 1), value: fmtLakhs(l.monthlyAmount * 12), confirmed: !!l.monthlyAmount };
   });
   var opexRows = (opex.lineItems || []).map(function (l, i) {
-    return { label: l.item || 'Operating expense ' + (i + 1), value: l.monthlyAmount ? 'Rs. ' + Math.round(l.monthlyAmount * 12).toLocaleString('en-IN') + '/yr' : null, confirmed: !!l.monthlyAmount };
+    return { label: l.item || 'Operating expense ' + (i + 1), value: fmtLakhs(l.monthlyAmount * 12), confirmed: !!l.monthlyAmount };
   });
 
   return [
@@ -236,6 +240,17 @@ export default function FinancialModelPanel({ extraction, model, onProceed }) {
           <p style={{ fontSize: '13px', color: 'var(--text-success)', fontWeight: '500', margin: '0 0 10px' }}>
             Financial model built from your interview.
           </p>
+          {pct < 100 && (
+            // The AI is now instructed to cover every section (including
+            // capital & funding) before finalizing, but this is a second,
+            // independent line of defence: if it still finalizes early,
+            // don't let the user walk into valuation thinking the model is
+            // fully confirmed when the panel above it is visibly still
+            // showing "waiting..." rows.
+            <p style={{ fontSize: '11px', color: 'var(--text-warning, #b45309)', margin: '0 0 10px' }}>
+              {allRows.length - confirmedCount} field{allRows.length - confirmedCount === 1 ? '' : 's'} above are still unconfirmed ({pct}% complete) - valuation will use defaults for those until you fill them in.
+            </p>
+          )}
           <button onClick={onProceed} style={{
             padding: '10px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '500',
             background: '#16a34a', color: '#fff', border: 'none', cursor: 'pointer',
