@@ -89,6 +89,15 @@ export default function ConversationEngine({
   var scrollRef = useRef(null);
   var prevPhaseRef = useRef(convPhase);
   var mountedRef = useRef(true);
+  // Synchronous re-entrancy lock for sendMessage. `loading` state is not
+  // enough on its own: setLoading(true) doesn't take effect until the next
+  // render, so two calls to sendMessage fired in the same tick (a known
+  // browser quirk where Enter on some IME/virtual keyboards dispatches
+  // keydown twice) both read loading as still false and both go through,
+  // duplicating the user's message and firing two API calls. A ref updates
+  // immediately, before any re-render, so the second call is blocked no
+  // matter how close together the two triggers fire.
+  var sendingRef = useRef(false);
 
   var persona = PERSONAS[convPhase] || PERSONAS.discovery;
 
@@ -145,41 +154,34 @@ export default function ConversationEngine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  // --- Explicit-transition-only phase changes: announce, never auto-navigate ---
-  useEffect(function () {
-    if (prevPhaseRef.current === convPhase) return;
-    prevPhaseRef.current = convPhase;
-    if (restoring) return; // don't announce a phase that arrived before restore finished
-    var text = TRANSITION_MESSAGES[convPhase];
-    if (text) {
-      setMessages(function (prev) { return prev.concat([{ role: 'assistant', text: text }]); });
-    }
-    if (convPhase === 'discovery') setExchangeCount(0);
-    setLastAction(null);
-    setPendingPhase(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [convPhase, restoring]);
-
-  // --- Auto-scroll, 50ms after every new message (per spec) ---
-  useEffect(function () {
-    var t = setTimeout(function () {
-      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }, 50);
-    return function () { clearTimeout(t); };
-  }, [messages, loading]);
-
-  function sendMessage(text) {
-    var val = (text != null ? text : input).trim();
-    if (!val || loading) return;
+  // --- Shared network dispatch. Every call to ai-search-v2 goes through here
+  // - both user-typed messages (sendMessage) and the automatic "kickoff" turn
+  // fired right after a phase transition, so the AI's first real question
+  // shows up without the user having to guess what to type. `baseMessages`
+  // lets a caller supply the visible-message array to build on top of
+  // synchronously (React state updates aren't visible until the next render,
+  // so the phase-transition effect can't just call setMessages then read
+  // `messages` back in the same tick). `hideUserMessage` sends the kickoff
+  // text to the backend as context without rendering a fake user chat bubble.
+  function dispatchToBackend(userText, opts) {
+    var options = opts || {};
+    var val = (userText != null ? userText : input).trim();
+    if (!val || loading || sendingRef.current) return;
+    sendingRef.current = true;
     setInput('');
     setLastAction(null);
     setPendingPhase(null);
 
-    var newMessages = messages.concat([{ role: 'user', text: val }]);
+    var base = options.baseMessages != null ? options.baseMessages : messages;
+    var newMessages = options.hideUserMessage ? base : base.concat([{ role: 'user', text: val }]);
     setMessages(newMessages);
     setLoading(true);
 
-    var history = newMessages.map(function (m) { return { role: m.role, content: m.text }; });
+    var historyBase = options.hideUserMessage ? base.concat([{ role: 'user', text: val }]) : newMessages;
+    var history = historyBase.map(function (m) { return { role: m.role, content: m.text }; });
+
+    var phase = options.phase != null ? options.phase : convPhase;
+    var exCount = options.exchangeCount != null ? options.exchangeCount : exchangeCount;
 
     callAiSearch({
       message: val,
@@ -187,12 +189,13 @@ export default function ConversationEngine({
       userContext: briefToContext(brief),
       sessionId: sessionId,
       userId: user ? user.id : null,
-      conversationPhase: convPhase,
-      exchangeCount: exchangeCount,
+      conversationPhase: phase,
+      exchangeCount: exCount,
       priorExtraction: priorExtraction && Object.keys(priorExtraction).length ? priorExtraction : null,
       priorModel: priorModel || null,
       priorBrief: brief || null,
     }).then(function (data) {
+      sendingRef.current = false;
       if (!mountedRef.current) return;
       setLoading(false);
 
@@ -207,11 +210,62 @@ export default function ConversationEngine({
       if (data.action && data.action.type) setLastAction(data.action);
       if (data.nextPhase && data.nextPhase !== convPhase) setPendingPhase(data.nextPhase);
     }).catch(function () {
+      sendingRef.current = false;
       if (!mountedRef.current) return;
       setLoading(false);
       setMessages(newMessages.concat([{ role: 'assistant', text: 'Something went wrong reaching the AI advisor. Please try again in a moment.' }]));
     });
   }
+
+  function sendMessage(text) {
+    dispatchToBackend(text != null ? text : input, {});
+  }
+
+  // Synthetic first turn sent right after landing on a phase that runs a
+  // real one-question-at-a-time interview, so the AI's actual first question
+  // appears automatically instead of the user staring at a static transition
+  // line with nothing to do. Never shown as a chat bubble (hideUserMessage) -
+  // only the transition text and the AI's reply are visible. valuation and
+  // listings are deliberately excluded: their transition copy is "ask me
+  // anything about the panel", not an interview, so there is no first
+  // question to force - an unsolicited AI message there would contradict
+  // what the transition text just told the user to do. discovery is covered
+  // by GREETING/restore already.
+  var KICKOFF_MESSAGES = {
+    analyst: 'Please begin the financial interview.',
+    buyerQualification: 'Please begin the buyer qualification questions.',
+  };
+
+  // --- Explicit-transition-only phase changes: announce, never auto-navigate ---
+  useEffect(function () {
+    if (prevPhaseRef.current === convPhase) return;
+    prevPhaseRef.current = convPhase;
+    if (restoring) return; // don't announce a phase that arrived before restore finished
+
+    var base = messages;
+    var text = TRANSITION_MESSAGES[convPhase];
+    if (text) {
+      base = base.concat([{ role: 'assistant', text: text }]);
+      setMessages(base);
+    }
+    setExchangeCount(0);
+    setLastAction(null);
+    setPendingPhase(null);
+
+    var kickoff = KICKOFF_MESSAGES[convPhase];
+    if (kickoff) {
+      dispatchToBackend(kickoff, { hideUserMessage: true, baseMessages: base, phase: convPhase, exchangeCount: 0 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convPhase, restoring]);
+
+  // --- Auto-scroll, 50ms after every new message (per spec) ---
+  useEffect(function () {
+    var t = setTimeout(function () {
+      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }, 50);
+    return function () { clearTimeout(t); };
+  }, [messages, loading]);
 
   // --- External context injection (listing click -> chat) -----------------
   var lastInjectKeyRef = useRef(null);
