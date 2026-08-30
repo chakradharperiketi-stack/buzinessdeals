@@ -130,7 +130,7 @@ function ComingNextPanel({ title, note }) {
   );
 }
 
-function RightPanel({ convPhase, user, sellerForm, selEngId, convExtraction, convModel, brief, onCard, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing }) {
+function RightPanel({ convPhase, user, sellerForm, selEngId, convExtraction, convModel, brief, onCard, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange }) {
   return (
     <div style={{ width: '65%', flex: 1, height: '100%', overflowY: 'auto', background: 'var(--surface-0)' }}>
       {convPhase === 'discovery' && <HomeScreen onCard={onCard} />}
@@ -141,6 +141,7 @@ function RightPanel({ convPhase, user, sellerForm, selEngId, convExtraction, con
           engagementId={selEngId}
           initialForm={sellerForm}
           onHome={onHomeFromValuation}
+          onFormChange={onSellerFormChange}
         />
       )}
 
@@ -356,6 +357,7 @@ export default function Platform({ user, sessionId, onSignOut }) {
           onProceedToValuation={function () { setConvPhase('valuation'); }}
           onBrowseMatched={function () { setConvPhase('listings'); }}
           onAskAiAboutListing={handleAskAiAboutListing}
+          onSellerFormChange={setSellerForm}
         />
       </div>
     </div>
