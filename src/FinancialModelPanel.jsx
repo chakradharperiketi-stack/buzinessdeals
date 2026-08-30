@@ -5,9 +5,13 @@
 // presentational component - no chat, no network calls; Platform.jsx owns
 // the data and passes it down.
 
+// Lakhs-denominated figures always show 2 decimals - at this scale a whole
+// number hides real precision (Rs. 42 L vs Rs. 42.35 L is a material
+// difference). Plain-rupee figures elsewhere (cogsRows/opexRows below) stay
+// undecimalled on purpose - decimal paise on a rupee amount is not material.
 function fmtLakhs(v) {
   if (v == null || v === '' || isNaN(v) || Number(v) === 0) return null;
-  return 'Rs. ' + Number(v).toLocaleString('en-IN') + ' L';
+  return 'Rs. ' + Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' L';
 }
 function fmtDays(v) {
   if (v == null || v === '' || isNaN(v) || Number(v) === 0) return null;
@@ -99,8 +103,9 @@ function buildSections(data) {
 
 var MONTHS_SHORT = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
 
+// Monthly grid cells are Rs Lakhs too - same 2-decimal rule as fmtLakhs.
 function fmtNum(v) {
-  return Math.round(Number(v) || 0).toLocaleString('en-IN');
+  return Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // Renders the bottom-up build-up (capacityBuildUp for revenue, staffingBuildUp
