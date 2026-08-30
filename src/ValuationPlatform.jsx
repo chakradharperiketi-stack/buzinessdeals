@@ -1945,6 +1945,17 @@ function ValuationPlatform(props){
     if(changed)showChangeBanner(changed.label);
   },[form.forecast,form.dso,form.dpo,form.debt,form.rf,form.beta,form.terminalGrowth,form.taxRate]);
 
+  // Mirror every edit up to the parent (Platform.jsx -> localStorage), same
+  // way convExtraction/convModel already survive a remount or crash. Without
+  // this, `form` only ever reached the outside world via the 30s Supabase
+  // autosave, which no-ops whenever there's no engagementId (i.e. every
+  // fresh analyst -> valuation handoff, since none is created in that flow)
+  // - so every keystroke here was living in this component's memory alone
+  // and vanished on any remount, ErrorBoundary reset included.
+  useEffect(function(){
+    if(props.onFormChange) props.onFormChange(form);
+  },[form]);
+
   const years=useMemo(()=>getDynamicYears(form.forecastPeriod),[form.forecastPeriod]);
   const dcf=useMemo(()=>computeDCF(form,years),[form,years]);
   const vc=useMemo(()=>(form.selectedMethods||[]).includes("vc")?computeVC(form,dcf.rows):null,[form,dcf.rows]);
