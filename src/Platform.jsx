@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ValuationPlatform } from './ValuationPlatform';
+import { ValuationPlatform, CreateListingModal } from './ValuationPlatform';
 import ConversationEngine from './ConversationEngine';
 import FinancialModelPanel from './FinancialModelPanel';
 import AcquisitionBriefPanel from './AcquisitionBriefPanel';
@@ -15,6 +15,12 @@ var ADMIN_EMAILS = ['zeniusadvisors@gmail.com', 'chakradhar@vkcorpca.com', 'chak
 var ACTION_CARDS = [
   { key: 'listings', icon: 'ti-search', color: '#2563eb', title: 'Browse or Invest', desc: 'Explore verified listings matched to your budget and sector.' },
   { key: 'analyst', icon: 'ti-message-chatbot', color: '#7c3aed', title: 'Sell or Raise Capital', desc: 'A guided AI interview builds your financial model (P&L) first - Rs. 1,500, pay after it’s built - then carries into your listing or valuation.' },
+  // Direct, no-interview path (see CreateListingModal, imported from
+  // ValuationPlatform.jsx) - already-know-your-numbers sellers can submit a
+  // listing straight away. It ships self-reported (muted badge, not the
+  // green "Verified" one) - the AI Financial Model remains the way to a
+  // Verified badge, pitched to the user right after they submit.
+  { key: 'directListing', icon: 'ti-building-store', color: '#16a34a', title: 'List Your Business', desc: 'Already know your numbers? Submit a listing directly for review - no interview needed. Self-reported, not Verified.' },
   { key: 'valuation', icon: 'ti-chart-line', color: '#2563eb', title: 'Valuation Report', desc: 'A full DCF valuation using Damodaran India data - from Rs. 2,000.' },
 ];
 
@@ -229,6 +235,13 @@ export default function Platform({ user, sessionId, onSignOut }) {
   // 'valuation' case) - lets HomeScreen show a brief loading state instead
   // of appearing unresponsive while the profile-based form is fetched.
   var cardLoadingSt = useState(null), cardLoading = cardLoadingSt[0], setCardLoading = cardLoadingSt[1];
+  // Direct "List Your Business" path - a modal overlay, not a convPhase, so
+  // it can open on top of whatever's currently showing (including Home)
+  // without disturbing the chat/right-panel state underneath it.
+  var showDirectListingSt = useState(false), showDirectListing = showDirectListingSt[0], setShowDirectListing = showDirectListingSt[1];
+  // Shown once, dismissibly, right after a self-reported listing is
+  // submitted - the AI Financial Model upsell ("upgrade to Verified").
+  var directListingUpsellSt = useState(false), directListingUpsell = directListingUpsellSt[0], setDirectListingUpsell = directListingUpsellSt[1];
 
   // Persist on every change so a remount (tab switch/away-and-back, preview
   // reload) restores the panel instead of resetting to Home.
@@ -284,6 +297,10 @@ export default function Platform({ user, sessionId, onSignOut }) {
   }
 
   function handleCard(cardKey) {
+    if (cardKey === 'directListing') {
+      setShowDirectListing(true);
+      return;
+    }
     if (cardKey === 'valuation') {
       // Starting a fresh valuation from the home screen (no prior AI
       // interview) - don't carry over a form built for a different
@@ -352,6 +369,34 @@ export default function Platform({ user, sessionId, onSignOut }) {
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <NavBar user={user} isAdmin={isAdmin} onHome={goHome} onGoListings={function () { setConvPhase('listings'); }} onSignOut={onSignOut} />
+      {directListingUpsell && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
+          padding: '10px 20px', background: '#ecfdf5', borderBottom: '1px solid #6ee7b7', flexShrink: 0,
+        }}>
+          <p style={{ fontSize: '12px', color: '#065f46', margin: 0, lineHeight: '1.5' }}>
+            <strong>Listing submitted for review</strong> — it's marked self-reported for now. Complete the AI Financial Model (Rs. 1,500) any time to run a real valuation and upgrade it to a Verified badge, which buyers trust more.
+          </p>
+          <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+            <button onClick={function () { setDirectListingUpsell(false); handleCard('analyst'); }} style={{
+              fontSize: '12px', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer',
+              background: '#059669', color: '#fff', border: 'none', whiteSpace: 'nowrap',
+            }}>Start AI Financial Model →</button>
+            <button onClick={function () { setDirectListingUpsell(false); }} style={{
+              fontSize: '12px', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer',
+              background: 'transparent', color: '#065f46', border: '1px solid #6ee7b7',
+            }}>Dismiss</button>
+          </div>
+        </div>
+      )}
+      {showDirectListing && (
+        <CreateListingModal
+          userId={user ? user.id : null}
+          hasValuationReport={false}
+          onClose={function () { setShowDirectListing(false); }}
+          onSuccess={function () { setShowDirectListing(false); setDirectListingUpsell(true); }}
+        />
+      )}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <ConversationEngine
           user={user}
