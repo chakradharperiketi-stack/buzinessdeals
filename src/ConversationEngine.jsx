@@ -71,6 +71,12 @@ export default function ConversationEngine({
   onModelComplete,
   onAction,
   onReset,
+  // Navigates straight to the Home screen without touching any recorded
+  // data (same as the NavBar logo / profile-menu "Home" entry) - distinct
+  // from Clear, which wipes the current section's data first. Lets the user
+  // back out of a section they clicked into by mistake without losing
+  // in-progress work if they come back.
+  onGoHome,
   // { text, key } - set by Platform when something outside the chat (e.g. a
   // listing card's "Ask AI to analyse") wants to hand context back into the
   // conversation. `key` must change even if `text` repeats, so the same
@@ -311,12 +317,20 @@ export default function ConversationEngine({
               <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)', margin: 0 }}>buzinessdeals.com</p>
             </div>
           </div>
-          {messages.length > 1 && (
-            <button onClick={handleClear} title="Clear conversation" style={{
-              fontSize: '11px', color: 'rgba(255,255,255,0.5)', background: 'transparent',
-              border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer',
-            }}>Clear</button>
-          )}
+          <div style={{ display: 'flex', gap: '6px' }}>
+            {convPhase !== 'discovery' && (
+              <button onClick={function () { onGoHome && onGoHome(); }} title="Back to Home" style={{
+                display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'rgba(255,255,255,0.5)', background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer',
+              }}><i className="ti ti-home" aria-hidden="true" style={{ fontSize: '11px' }} />Home</button>
+            )}
+            {messages.length > 1 && (
+              <button onClick={handleClear} title="Clear conversation and start over" style={{
+                fontSize: '11px', color: 'rgba(255,255,255,0.5)', background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer',
+              }}>Clear</button>
+            )}
+          </div>
         </div>
         {convPhase === 'discovery' && (
           <div style={{ display: 'flex', gap: '4px' }}>
