@@ -14,8 +14,7 @@ var ADMIN_EMAILS = ['zeniusadvisors@gmail.com', 'chakradhar@vkcorpca.com', 'chak
 
 var ACTION_CARDS = [
   { key: 'listings', icon: 'ti-search', color: '#2563eb', title: 'Browse or Invest', desc: 'Explore verified listings matched to your budget and sector.' },
-  { key: 'sellerDashboard', icon: 'ti-building', color: '#16a34a', title: 'Sell or Raise Capital', desc: 'List your business for sale, succession, or minority investment.' },
-  { key: 'analyst', icon: 'ti-message-chatbot', color: '#7c3aed', title: 'AI Financial Model', desc: 'A guided interview builds your P&L - Rs. 1,500, pay after it’s built.' },
+  { key: 'analyst', icon: 'ti-message-chatbot', color: '#7c3aed', title: 'Sell or Raise Capital', desc: 'A guided AI interview builds your financial model (P&L) first - Rs. 1,500, pay after it’s built - then carries into your listing or valuation.' },
   { key: 'valuation', icon: 'ti-chart-line', color: '#2563eb', title: 'Valuation Report', desc: 'A full DCF valuation using Damodaran India data - from Rs. 2,000.' },
 ];
 
@@ -85,7 +84,7 @@ function NavBar({ user, isAdmin, onHome, onGoListings, onSignOut }) {
   );
 }
 
-function HomeScreen({ onCard }) {
+function HomeScreen({ onCard, loadingKey }) {
   var hour = new Date().getHours();
   var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   return (
@@ -94,19 +93,21 @@ function HomeScreen({ onCard }) {
       <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 28px' }}>What would you like to do today?</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
         {ACTION_CARDS.map(function (c) {
+          var isLoading = loadingKey === c.key;
           return (
-            <button key={c.key} onClick={function () { onCard(c.key); }} style={{
+            <button key={c.key} disabled={isLoading} onClick={function () { onCard(c.key); }} style={{
               textAlign: 'left', padding: '20px', borderRadius: '14px', border: '1px solid var(--border)',
-              background: 'var(--surface-2)', cursor: 'pointer', boxShadow: 'var(--shadow-sm)',
+              background: 'var(--surface-2)', cursor: isLoading ? 'default' : 'pointer', boxShadow: 'var(--shadow-sm)',
+              opacity: isLoading ? 0.6 : 1,
             }}>
               <div style={{
                 width: '38px', height: '38px', borderRadius: '10px', background: c.color + '1a',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px',
               }}>
-                <i className={'ti ' + c.icon} aria-hidden="true" style={{ fontSize: '18px', color: c.color }} />
+                <i className={'ti ' + (isLoading ? 'ti-loader-2' : c.icon)} aria-hidden="true" style={{ fontSize: '18px', color: c.color }} />
               </div>
               <p style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 4px' }}>{c.title}</p>
-              <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.55' }}>{c.desc}</p>
+              <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.55' }}>{isLoading ? 'Loading…' : c.desc}</p>
             </button>
           );
         })}
@@ -130,10 +131,10 @@ function ComingNextPanel({ title, note }) {
   );
 }
 
-function RightPanel({ convPhase, user, sessionId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange }) {
+function RightPanel({ convPhase, user, sessionId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, cardLoading, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange }) {
   return (
     <div style={{ width: '65%', flex: 1, height: '100%', overflowY: 'auto', background: 'var(--surface-0)' }}>
-      {convPhase === 'discovery' && <HomeScreen onCard={onCard} />}
+      {convPhase === 'discovery' && <HomeScreen onCard={onCard} loadingKey={cardLoading} />}
 
       {convPhase === 'valuation' && (
         <ValuationPlatform
@@ -224,6 +225,10 @@ export default function Platform({ user, sessionId, onSignOut }) {
   var reportSt = useState(persisted.report || null), report = reportSt[0], setReport = reportSt[1];
   // Listing-click -> chat context handoff (bidirectional discovery link).
   var injectSt = useState(null), injectMessage = injectSt[0], setInjectMessage = injectSt[1];
+  // Which HomeScreen card (if any) is mid-async-load (see handleCard's
+  // 'valuation' case) - lets HomeScreen show a brief loading state instead
+  // of appearing unresponsive while the profile-based form is fetched.
+  var cardLoadingSt = useState(null), cardLoading = cardLoadingSt[0], setCardLoading = cardLoadingSt[1];
 
   // Persist on every change so a remount (tab switch/away-and-back, preview
   // reload) restores the panel instead of resetting to Home.
@@ -238,48 +243,15 @@ export default function Platform({ user, sessionId, onSignOut }) {
     setConvPhase('discovery');
   }
 
-  function handleCard(cardKey) {
-    if (cardKey === 'sellerDashboard') {
-      // Seller dashboard (multiple engagements as cards) ships in a later
-      // step. Route into the financial-interview persona first, not
-      // straight into the valuation form - per the product brief, the AI
-      // must understand the business before any valuation number gets
-      // produced. FinancialModelPanel's onProceed already carries the
-      // user into 'valuation' once the model is built, so this keeps the
-      // one real pipeline (analyst -> valuation) instead of a second,
-      // redundant entry point that skips it.
-      setSellerForm(null);
-      setSelEngId(null);
-      setConvPhase('analyst');
-      return;
-    }
-    if (cardKey === 'valuation') {
-      // Starting a fresh valuation from the home screen - don't carry over
-      // a form built for a different engagement.
-      setSellerForm(null);
-      setSelEngId(null);
-    }
-    setConvPhase(cardKey);
-  }
-
-  // --- ConversationEngine callbacks ----------------------------------------
-
-  function handleExtraction(data) {
-    setConvExtraction(data);
-  }
-
-  function handleModelComplete(model) {
-    setConvModel(model);
-    var computed = computeModel(model);
-
-    // Professional credentials (CA name, membership number, firm) shape the
-    // report per spec section 10 - best-effort fetch, falls back to the
-    // platform-indicative defaults baked into buildV3FormFromModel if this
-    // fails or the user has no profile row yet.
+  // Shared by handleModelComplete (after the AI interview finishes) and
+  // handleCard's direct "Valuation Report" entry (no interview at all) - both
+  // need the same profile lookup so ValuationPlatform gets a non-null
+  // initialForm with engagementType already set, instead of falling back to
+  // the legacy "who is performing this valuation" landing screen.
+  function loadSellerFormForProfile(model, computed, cb) {
     var applyForm = function (profile) {
-      setSellerForm(buildV3FormFromModel(model, computed, profile));
+      cb(buildV3FormFromModel(model, computed, profile));
     };
-
     if (user && user.id) {
       var settled = false;
       var timeoutId = setTimeout(function () {
@@ -311,6 +283,41 @@ export default function Platform({ user, sessionId, onSignOut }) {
     }
   }
 
+  function handleCard(cardKey) {
+    if (cardKey === 'valuation') {
+      // Starting a fresh valuation from the home screen (no prior AI
+      // interview) - don't carry over a form built for a different
+      // engagement, and don't switch panels until a profile-based form is
+      // ready, so ValuationPlatform never mounts with a null initialForm
+      // (which would show the legacy engagementType picker screen).
+      setSelEngId(null);
+      setCardLoading('valuation');
+      loadSellerFormForProfile(null, null, function (form) {
+        setSellerForm(form);
+        setConvPhase('valuation');
+        setCardLoading(null);
+      });
+      return;
+    }
+    setConvPhase(cardKey);
+  }
+
+  // --- ConversationEngine callbacks ----------------------------------------
+
+  function handleExtraction(data) {
+    setConvExtraction(data);
+  }
+
+  function handleModelComplete(model) {
+    setConvModel(model);
+    var computed = computeModel(model);
+    // Professional credentials (CA name, membership number, firm) shape the
+    // report per spec section 10 - best-effort fetch, falls back to the
+    // platform-indicative defaults baked into buildV3FormFromModel if this
+    // fails or the user has no profile row yet.
+    loadSellerFormForProfile(model, computed, setSellerForm);
+  }
+
   function handleBriefComplete(briefData) {
     setBrief(briefData);
   }
@@ -336,6 +343,10 @@ export default function Platform({ user, sessionId, onSignOut }) {
     setSelEngId(null);
     setReport(null);
     clearPlatformState(sessionId);
+    // "Clear" is meant to let the user start completely from the beginning -
+    // that means back at Home, not sitting in an emptied-out version of
+    // whichever section they were already in.
+    setConvPhase('discovery');
   }
 
   return (
@@ -356,6 +367,7 @@ export default function Platform({ user, sessionId, onSignOut }) {
           onBriefComplete={handleBriefComplete}
           onAction={handleAction}
           onReset={handleReset}
+          onGoHome={goHome}
           injectMessage={injectMessage}
         />
         <RightPanel
@@ -370,6 +382,7 @@ export default function Platform({ user, sessionId, onSignOut }) {
           report={report}
           onReportGenerated={setReport}
           onCard={handleCard}
+          cardLoading={cardLoading}
           onHomeFromValuation={goHome}
           onProceedToValuation={function () { setConvPhase('valuation'); }}
           onBrowseMatched={function () { setConvPhase('listings'); }}
