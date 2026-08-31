@@ -12,6 +12,12 @@
 // analysis" card at the bottom is the only upsell surface, and it's static
 // copy, not a paywall.
 
+import { useState } from 'react';
+import { buildYearSeries } from './lib/financialModel';
+import { buildTrendBarChart, buildMarginLineChart, buildCostStructureBar } from './lib/charts';
+import ChartSvg from './ChartSvg';
+import { generateReportPdf } from './lib/reportApi';
+
 var BASIS_LABELS = {
   client_confirmed: { text: 'Client confirmed', color: '#16a34a', bg: 'rgba(22,163,74,0.1)' },
   ai_assumption: { text: 'AI estimate', color: '#b45309', bg: 'rgba(180,83,9,0.1)' },
@@ -85,7 +91,45 @@ function ObservationRow({ label, text }) {
   );
 }
 
-export default function FinancialReportPreview({ report, panelCompletionPct }) {
+function DownloadPdfBar({ report, panelCompletionPct, onReportUpdated }) {
+  var genSt = useState(false), generatingPdf = genSt[0], setGeneratingPdf = genSt[1];
+  var errSt = useState(''), pdfError = errSt[0], setPdfError = errSt[1];
+
+  function handleGeneratePdf() {
+    if (generatingPdf || !report || !report.id) return;
+    setGeneratingPdf(true);
+    setPdfError('');
+    generateReportPdf({ reportId: report.id, completionPct: panelCompletionPct })
+      .then(function (r) {
+        setGeneratingPdf(false);
+        onReportUpdated && onReportUpdated(r.report);
+      })
+      .catch(function (err) {
+        setGeneratingPdf(false);
+        setPdfError((err && err.message) || 'Something went wrong generating the PDF.');
+      });
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', margin: '4px 0 18px' }}>
+      {report.pdf_url ? (
+        <a href={report.pdf_url} target="_blank" rel="noopener noreferrer" style={{
+          padding: '10px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: '600',
+          background: '#1d4ed8', color: '#fff', textDecoration: 'none', display: 'inline-block',
+        }}>Download PDF report</a>
+      ) : (
+        <button onClick={handleGeneratePdf} disabled={generatingPdf} style={{
+          padding: '10px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: '600',
+          background: generatingPdf ? 'var(--surface-3)' : '#1d4ed8', color: generatingPdf ? 'var(--text-muted)' : '#fff',
+          border: 'none', cursor: generatingPdf ? 'default' : 'pointer',
+        }}>{generatingPdf ? 'Preparing your PDF (this can take up to a minute)...' : 'Download as PDF report'}</button>
+      )}
+      {pdfError && <p style={{ fontSize: '11px', color: '#dc2626', margin: 0, textAlign: 'center' }}>{pdfError}</p>}
+    </div>
+  );
+}
+
+export default function FinancialReportPreview({ report, panelCompletionPct, onReportUpdated }) {
   if (!report) return null;
 
   if (report.status === 'failed') {
@@ -102,6 +146,18 @@ export default function FinancialReportPreview({ report, panelCompletionPct }) {
   var bp = (report.extraction && report.extraction.businessProfile) || {};
   var assumptions = d.assumptions || {};
 
+  var computed = report.computed_model;
+  var yearSeries = computed ? buildYearSeries(computed) : [];
+  var trendChart = yearSeries.length ? buildTrendBarChart({ years: yearSeries }) : null;
+  var marginChart = yearSeries.length ? buildMarginLineChart({ years: yearSeries }) : null;
+  var costChart = (computed && computed.base && computed.base.rev > 0)
+    ? buildCostStructureBar({
+        cogsPct: (computed.base.cogs / computed.base.rev) * 100,
+        opexPct: (computed.base.opex / computed.base.rev) * 100,
+        ebitdaPct: (computed.base.ebitda / computed.base.rev) * 100,
+      })
+    : null;
+
   return (
     <div style={{ marginTop: '4px' }}>
       <div style={{ textAlign: 'center', padding: '20px 0 16px', borderBottom: '2px solid var(--border-accent)', marginBottom: '18px' }}>
@@ -109,6 +165,8 @@ export default function FinancialReportPreview({ report, panelCompletionPct }) {
         <p style={{ fontSize: '17px', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 4px' }}>{bp.name || 'Prepared for your business'}</p>
         <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>{bp.sector || 'Sector not specified'} &middot; Generated {d.generatedAt ? new Date(d.generatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</p>
       </div>
+
+      <DownloadPdfBar report={report} panelCompletionPct={panelCompletionPct} onReportUpdated={onReportUpdated} />
 
       <Card title="Executive summary">
         <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.7' }}>{d.executiveSummary}</p>
@@ -127,6 +185,14 @@ export default function FinancialReportPreview({ report, panelCompletionPct }) {
         <AssumptionTable title="Working capital" rows={assumptions.workingCapital} />
         <AssumptionTable title="Assets &amp; funding" rows={assumptions.assetsFunding} />
       </Card>
+
+      {!!(trendChart || marginChart || costChart) && (
+        <Card title="Financial trends" accent>
+          {trendChart && <ChartSvg chart={trendChart} title="Revenue, EBITDA & PAT — Current + 5-year trajectory (Rs Lakhs)" />}
+          {marginChart && <ChartSvg chart={marginChart} title="Margin trend (%)" />}
+          {costChart && <ChartSvg chart={costChart} title="Current-year cost structure (% of revenue)" />}
+        </Card>
+      )}
 
       {d.observations && (
         <Card title="AI financial observations">
