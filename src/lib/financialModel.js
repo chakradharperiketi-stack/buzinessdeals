@@ -119,4 +119,28 @@ export function computeMetrics(computed) {
   return metrics;
 }
 
+// Normalizes computeModel()'s output into a flat "Current + 5 years" row
+// series for charting (Phase 4 of the AI Financial Model Report feature) -
+// one place that turns base/years into {label, rev, ebitda, pat, ebitdaPct,
+// patPct} rows so lib/charts.js's builders never have to know about
+// computeModel()'s internal shape. Ported verbatim into the
+// generate-financial-report-pdf Edge Function for the PDF renderer.
+export function buildYearSeries(computed) {
+  if (!computed || !computed.base) return [];
+  var b = computed.base;
+  var rows = [{
+    label: 'Current', rev: b.rev, ebitda: b.ebitda, pat: b.pat,
+    ebitdaPct: b.rev > 0 ? (b.ebitda / b.rev) * 100 : 0,
+    patPct: b.rev > 0 ? (b.pat / b.rev) * 100 : 0,
+  }];
+  (computed.years || []).forEach(function (y) {
+    rows.push({
+      label: y.yr, rev: y.rev, ebitda: y.ebitda, pat: y.pat,
+      ebitdaPct: y.rev > 0 ? (y.ebitda / y.rev) * 100 : 0,
+      patPct: y.rev > 0 ? (y.pat / y.rev) * 100 : 0,
+    });
+  });
+  return rows;
+}
+
 export var DEPRECIATION_RATES = DEP_RATES;
