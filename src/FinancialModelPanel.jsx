@@ -394,7 +394,7 @@ export default function FinancialModelPanel({ extraction, model, onProceed, sess
         </div>
       )}
 
-      {report && <FinancialReportPreview report={report} panelCompletionPct={pct} />}
+      {report && <FinancialReportPreview report={report} panelCompletionPct={pct} onReportUpdated={onReportGenerated} />}
     </div>
   );
 }
