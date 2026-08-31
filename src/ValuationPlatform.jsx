@@ -1508,7 +1508,7 @@ function CreateListingModal(p) {
     dealStructure: ["Full acquisition"],
     managementStays: true,
     closingTimeline: "6-12 months",
-        // Callers that already ran the AI Financial Model + DCF (S8_Report below)
+    // Callers that already ran the AI Financial Model + DCF (S8_Report below)
     // never pass this prop, so they keep today's behaviour (verified). The
     // standalone "List Your Business" entry point (Platform.jsx) passes
     // hasValuationReport={false} explicitly, since no valuation exists yet.
@@ -1594,7 +1594,7 @@ function CreateListingModal(p) {
               Your listing goes to review before going live. We will notify you within 24 hours.
             </p>
           </div>
-          <button onClick={p.onClose}
+          <button onClick={p.onClose} aria-label="Cancel"
             style={{padding:"6px 12px", borderRadius:"6px", cursor:"pointer",
               background:"var(--surface-1)", color:"var(--text-secondary)",
               border:"0.5px solid var(--border)", fontSize:"12px"}}>
@@ -1602,7 +1602,7 @@ function CreateListingModal(p) {
           </button>
         </div>
 
-                {!lf.hasValuationReport && (
+        {!lf.hasValuationReport && (
           <div style={{padding:"10px 14px", background:"#eff6ff", border:"0.5px solid #93c5fd",
             borderRadius:"8px", marginBottom:"16px"}}>
             <p style={{fontSize:"12px", color:"#1d4ed8", margin:0, lineHeight:"1.6"}}>
@@ -1610,6 +1610,8 @@ function CreateListingModal(p) {
             </p>
           </div>
         )}
+
+        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:"14px", marginBottom:"14px"}}>
           <div style={{gridColumn:"span 2"}}>
             <label style={lbl}>Business name (public name — not company registration name)</label>
             <input value={lf.businessName} onChange={function(e){updateLf("businessName",e.target.value);}} style={inp} placeholder="e.g. South India IT Services Firm"/>
