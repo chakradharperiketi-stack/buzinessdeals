@@ -130,7 +130,7 @@ function ComingNextPanel({ title, note }) {
   );
 }
 
-function RightPanel({ convPhase, user, sellerForm, selEngId, convExtraction, convModel, brief, onCard, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange }) {
+function RightPanel({ convPhase, user, sessionId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange }) {
   return (
     <div style={{ width: '65%', flex: 1, height: '100%', overflowY: 'auto', background: 'var(--surface-0)' }}>
       {convPhase === 'discovery' && <HomeScreen onCard={onCard} />}
@@ -146,7 +146,15 @@ function RightPanel({ convPhase, user, sellerForm, selEngId, convExtraction, con
       )}
 
       {convPhase === 'analyst' && (
-        <FinancialModelPanel extraction={convExtraction} model={convModel} onProceed={onProceedToValuation} />
+        <FinancialModelPanel
+          extraction={convExtraction}
+          model={convModel}
+          onProceed={onProceedToValuation}
+          sessionId={sessionId}
+          userId={user ? user.id : null}
+          report={report}
+          onReportGenerated={onReportGenerated}
+        />
       )}
 
       {convPhase === 'buyerQualification' && (
@@ -209,15 +217,20 @@ export default function Platform({ user, sessionId, onSignOut }) {
   var briefSt = useState(persisted.brief || null), brief = briefSt[0], setBrief = briefSt[1];
   var sellerFormSt = useState(persisted.sellerForm || null), sellerForm = sellerFormSt[0], setSellerForm = sellerFormSt[1];
   var selEngIdSt = useState(persisted.selEngId || null), selEngId = selEngIdSt[0], setSelEngId = selEngIdSt[1];
+  // The generated AI Financial Model Report (see generate-financial-report
+  // edge function) - persisted the same way as sellerForm/convModel so it
+  // survives a remount instead of forcing regeneration (a real API call,
+  // not free) every time the user tabs away and back.
+  var reportSt = useState(persisted.report || null), report = reportSt[0], setReport = reportSt[1];
   // Listing-click -> chat context handoff (bidirectional discovery link).
   var injectSt = useState(null), injectMessage = injectSt[0], setInjectMessage = injectSt[1];
 
   // Persist on every change so a remount (tab switch/away-and-back, preview
   // reload) restores the panel instead of resetting to Home.
   useEffect(function () {
-    savePlatformState(sessionId, { convPhase: convPhase, convExtraction: convExtraction, convModel: convModel, brief: brief, sellerForm: sellerForm, selEngId: selEngId });
+    savePlatformState(sessionId, { convPhase: convPhase, convExtraction: convExtraction, convModel: convModel, brief: brief, sellerForm: sellerForm, selEngId: selEngId, report: report });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, convPhase, convExtraction, convModel, brief, sellerForm, selEngId]);
+  }, [sessionId, convPhase, convExtraction, convModel, brief, sellerForm, selEngId, report]);
 
   var isAdmin = !!(user && user.email && ADMIN_EMAILS.indexOf(user.email.toLowerCase()) !== -1);
 
@@ -321,6 +334,7 @@ export default function Platform({ user, sessionId, onSignOut }) {
     setBrief(null);
     setSellerForm(null);
     setSelEngId(null);
+    setReport(null);
     clearPlatformState(sessionId);
   }
 
@@ -347,11 +361,14 @@ export default function Platform({ user, sessionId, onSignOut }) {
         <RightPanel
           convPhase={convPhase}
           user={user}
+          sessionId={sessionId}
           sellerForm={sellerForm}
           selEngId={selEngId}
           convExtraction={convExtraction}
           convModel={convModel}
           brief={brief}
+          report={report}
+          onReportGenerated={setReport}
           onCard={handleCard}
           onHomeFromValuation={goHome}
           onProceedToValuation={function () { setConvPhase('valuation'); }}
