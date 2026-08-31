@@ -80,4 +80,43 @@ export function computeModel(extraction) {
   };
 }
 
+// Key ratios for the "Key Financial Metrics" report section - pure derived
+// math from computeModel()'s own output, nothing new asked of the user and
+// nothing that needs an AI call. Dynamically adapts to what's actually
+// computable: a metric whose inputs are all zero/missing is left out rather
+// than shown as a misleading 0% or Infinity.
+export function computeMetrics(computed) {
+  if (!computed || !computed.years || !computed.years.length) return null;
+  var base = computed.base;
+  var years = computed.years;
+  var last = years[years.length - 1];
+  var n = years.length;
+  var metrics = {};
+
+  if (base.rev > 0 && last.rev > 0) {
+    metrics.revenueCagrPct = Math.round((Math.pow(last.rev / base.rev, 1 / n) - 1) * 1000) / 10;
+  }
+  if (base.rev > 0) {
+    metrics.ebitdaMarginCurrentPct = Math.round((base.ebitda / base.rev) * 1000) / 10;
+    metrics.patMarginCurrentPct = Math.round((base.pat / base.rev) * 1000) / 10;
+    metrics.fixedCostRatioPct = Math.round((base.opex / base.rev) * 1000) / 10;
+    metrics.variableCostRatioPct = Math.round((base.cogs / base.rev) * 1000) / 10;
+  }
+  if (last.rev > 0) {
+    metrics.ebitdaMarginYear5Pct = Math.round((last.ebitda / last.rev) * 1000) / 10;
+    metrics.patMarginYear5Pct = Math.round((last.pat / last.rev) * 1000) / 10;
+  }
+  var wc = computed.wc;
+  if (base.rev > 0 && wc) {
+    metrics.workingCapitalIntensityPct = Math.round((wc.nwc / base.rev) * 1000) / 10;
+  }
+  var ex = computed.extraction || {};
+  var wcExtract = ex.workingCapital || {};
+  if (wcExtract.receivableDays != null) metrics.receivableDays = wcExtract.receivableDays;
+  if (wcExtract.payableDays != null) metrics.payableDays = wcExtract.payableDays;
+  if (wcExtract.inventoryDays != null) metrics.inventoryDays = wcExtract.inventoryDays;
+
+  return metrics;
+}
+
 export var DEPRECIATION_RATES = DEP_RATES;
