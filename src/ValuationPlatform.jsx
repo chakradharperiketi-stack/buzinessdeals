@@ -1508,7 +1508,11 @@ function CreateListingModal(p) {
     dealStructure: ["Full acquisition"],
     managementStays: true,
     closingTimeline: "6-12 months",
-    hasValuationReport: true,
+        // Callers that already ran the AI Financial Model + DCF (S8_Report below)
+    // never pass this prop, so they keep today's behaviour (verified). The
+    // standalone "List Your Business" entry point (Platform.jsx) passes
+    // hasValuationReport={false} explicitly, since no valuation exists yet.
+    hasValuationReport: p.hasValuationReport !== false,
   });
   var lf = fSt[0], setLf = fSt[1];
   var savingSt = useState(false), saving = savingSt[0], setSaving = savingSt[1];
