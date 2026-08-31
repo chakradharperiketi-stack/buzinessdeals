@@ -1602,7 +1602,14 @@ function CreateListingModal(p) {
           </button>
         </div>
 
-        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:"14px", marginBottom:"14px"}}>
+                {!lf.hasValuationReport && (
+          <div style={{padding:"10px 14px", background:"#eff6ff", border:"0.5px solid #93c5fd",
+            borderRadius:"8px", marginBottom:"16px"}}>
+            <p style={{fontSize:"12px", color:"#1d4ed8", margin:0, lineHeight:"1.6"}}>
+              This listing will be marked <strong>self-reported</strong> — figures below are as you enter them, unverified. Buyers respond more to a <strong>Verified</strong> badge, backed by a real DCF valuation. You can upgrade to it any time by completing the AI Financial Model interview (Rs. 1,500) from your dashboard.
+            </p>
+          </div>
+        )}
           <div style={{gridColumn:"span 2"}}>
             <label style={lbl}>Business name (public name — not company registration name)</label>
             <input value={lf.businessName} onChange={function(e){updateLf("businessName",e.target.value);}} style={inp} placeholder="e.g. South India IT Services Firm"/>
@@ -2113,4 +2120,4 @@ Return ONLY valid JSON (no markdown, no preamble):
 // ================================================================
 // --- SYSTEM PROMPT: CA Financial Analyst Persona -----------------------------
 
-export { ValuationPlatform, SECTORS, initForm, UNIT_MULT };
+export { ValuationPlatform, CreateListingModal, SECTORS, initForm, UNIT_MULT };
