@@ -5,6 +5,11 @@
 // presentational component - no chat, no network calls; Platform.jsx owns
 // the data and passes it down.
 
+import { useState } from 'react';
+import { computeModel, computeMetrics } from './lib/financialModel';
+import { generateFinancialReport } from './lib/reportApi';
+import FinancialReportPreview from './FinancialReportPreview';
+
 // Lakhs-denominated figures always show 2 decimals - at this scale a whole
 // number hides real precision (Rs. 42 L vs Rs. 42.35 L is a material
 // difference). Every monetary field the analyst tool records - annualTotal,
@@ -162,6 +167,104 @@ function MonthlyGrid({ title, buildUp, lineKey, lineLabelKey }) {
   );
 }
 
+// 5-Year Financial Projection - computeModel()'s `years` array already
+// carried this math (it's what feeds valuation-handoff and V3), it just
+// never had anywhere to render. Pure deterministic output, no AI narration
+// of the numbers themselves - only shown once the model is finalized, since
+// projecting off a half-built extraction would be misleading.
+var YEAR_ROW_DEFS = [
+  { key: 'rev', label: 'Revenue', pct: false },
+  { key: 'cogs', label: 'Direct costs', pct: false },
+  { key: 'gp', label: 'Gross profit', pct: false, bold: true },
+  { key: 'opex', label: 'Operating expenses', pct: false },
+  { key: 'ebitda', label: 'EBITDA', pct: false, bold: true, highlight: true },
+  { key: 'ebitdaPct', label: 'EBITDA margin', pct: true },
+  { key: 'dep', label: 'Depreciation', pct: false },
+  { key: 'interest', label: 'Finance cost', pct: false },
+  { key: 'pbt', label: 'Profit before tax', pct: false },
+  { key: 'tax', label: 'Tax', pct: false },
+  { key: 'pat', label: 'Profit after tax', pct: false, bold: true },
+];
+
+function ProjectionTable({ computed }) {
+  if (!computed || !computed.years || !computed.years.length) return null;
+  var base = computed.base;
+  var baseRow = { yr: 'Current', rev: base.rev, cogs: base.cogs, gp: base.gp, opex: base.opex, ebitda: base.ebitda, dep: base.dep, interest: base.interest, pbt: base.pbt, tax: base.tax, pat: base.pat };
+  var cols = [baseRow].concat(computed.years);
+
+  return (
+    <div style={{ marginTop: '4px', marginBottom: '16px' }}>
+      <p style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 2px' }}>5-year financial projection</p>
+      <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '0 0 8px' }}>Rs. Lakhs, based on the growth and cost assumptions gathered in your interview - not a guarantee of future results.</p>
+      <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: '8px' }}>
+        <table style={{ borderCollapse: 'collapse', fontSize: '11px', minWidth: '560px', width: '100%' }}>
+          <thead>
+            <tr style={{ background: 'var(--surface-1)' }}>
+              <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: '600', color: 'var(--text-secondary)', position: 'sticky', left: 0, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Line item</th>
+              {cols.map(function (c, i) {
+                return <th key={i} style={{ textAlign: 'right', padding: '6px 8px', fontWeight: '600', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{c.yr}</th>;
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {YEAR_ROW_DEFS.map(function (rd) {
+              return (
+                <tr key={rd.key} style={{ borderTop: '1px solid var(--border)', background: rd.highlight ? 'var(--bg-accent)' : 'transparent' }}>
+                  <td style={{ padding: '6px 8px', fontWeight: rd.bold ? '600' : '400', color: rd.highlight ? 'var(--text-accent)' : 'var(--text-primary)', position: 'sticky', left: 0, background: rd.highlight ? 'var(--bg-accent)' : 'var(--surface-2)', whiteSpace: 'nowrap' }}>{rd.label}</td>
+                  {cols.map(function (c, i) {
+                    var v = rd.pct ? (c.rev > 0 ? (c.ebitda / c.rev) * 100 : 0) : c[rd.key];
+                    return (
+                      <td key={i} style={{ textAlign: 'right', padding: '6px 8px', fontWeight: rd.bold ? '600' : '400', color: (v < 0) ? 'var(--text-danger, #dc2626)' : rd.highlight ? 'var(--text-accent)' : 'var(--text-primary)' }}>
+                        {rd.pct ? (Math.round(v * 10) / 10) + '%' : fmtNum(v)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+var METRIC_DEFS = [
+  { key: 'revenueCagrPct', label: 'Revenue CAGR (5-yr)', suffix: '%' },
+  { key: 'ebitdaMarginCurrentPct', label: 'EBITDA margin (current)', suffix: '%' },
+  { key: 'ebitdaMarginYear5Pct', label: 'EBITDA margin (year 5)', suffix: '%' },
+  { key: 'patMarginCurrentPct', label: 'PAT margin (current)', suffix: '%' },
+  { key: 'fixedCostRatioPct', label: 'Fixed cost / revenue', suffix: '%' },
+  { key: 'variableCostRatioPct', label: 'Variable cost / revenue', suffix: '%' },
+  { key: 'workingCapitalIntensityPct', label: 'Working capital / revenue', suffix: '%' },
+  { key: 'receivableDays', label: 'Receivable days', suffix: ' days' },
+  { key: 'payableDays', label: 'Payable days', suffix: ' days' },
+];
+
+// Only metrics whose inputs actually resolved to a number are shown - a
+// business with no inventory, for instance, simply won't show a variable
+// cost ratio built on a zero, rather than a misleading 0%.
+function MetricsGrid({ metrics }) {
+  if (!metrics) return null;
+  var present = METRIC_DEFS.filter(function (m) { return metrics[m.key] != null; });
+  if (!present.length) return null;
+  return (
+    <div style={{ marginTop: '4px', marginBottom: '16px' }}>
+      <p style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 8px' }}>Key financial metrics</p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '8px' }}>
+        {present.map(function (m) {
+          return (
+            <div key={m.key} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px 12px' }}>
+              <p style={{ fontSize: '10px', color: 'var(--text-muted)', margin: '0 0 3px' }}>{m.label}</p>
+              <p style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)', margin: 0 }}>{metrics[m.key]}{m.suffix}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Row({ label, value, confirmed }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
@@ -191,13 +294,33 @@ function SectionCard({ title, rows }) {
   );
 }
 
-export default function FinancialModelPanel({ extraction, model, onProceed }) {
+export default function FinancialModelPanel({ extraction, model, onProceed, sessionId, userId, report, onReportGenerated }) {
   var data = model || extraction;
   var sections = buildSections(data || {});
   var allRows = sections.reduce(function (acc, s) { return acc.concat(s.rows); }, []);
   var confirmedCount = allRows.filter(function (r) { return r.confirmed; }).length;
   var pct = allRows.length > 0 ? Math.round((confirmedCount / allRows.length) * 100) : 0;
   var isComplete = !!model;
+  var computed = isComplete ? computeModel(data) : null;
+  var metrics = computed ? computeMetrics(computed) : null;
+
+  var generatingSt = useState(false), generating = generatingSt[0], setGenerating = generatingSt[1];
+  var genErrorSt = useState(''), genError = genErrorSt[0], setGenError = genErrorSt[1];
+
+  function handleGenerateReport() {
+    if (generating || !model) return;
+    setGenerating(true);
+    setGenError('');
+    generateFinancialReport({ sessionId: sessionId, userId: userId, extraction: model })
+      .then(function (r) {
+        setGenerating(false);
+        onReportGenerated && onReportGenerated(r);
+      })
+      .catch(function (err) {
+        setGenerating(false);
+        setGenError((err && err.message) || 'Something went wrong generating the report.');
+      });
+  }
 
   if (!data) {
     return (
@@ -235,10 +358,13 @@ export default function FinancialModelPanel({ extraction, model, onProceed }) {
         );
       })}
 
+      {isComplete && <ProjectionTable computed={computed} />}
+      {isComplete && <MetricsGrid metrics={metrics} />}
+
       {isComplete && (
         <div style={{ padding: '16px', background: 'var(--bg-success)', border: '1px solid var(--border-success)', borderRadius: '12px', textAlign: 'center', marginTop: '4px' }}>
           <p style={{ fontSize: '13px', color: 'var(--text-success)', fontWeight: '500', margin: '0 0 10px' }}>
-            Financial model built from your interview.
+            Your preliminary financial model has been prepared based on the information and assumptions gathered in this interview.
           </p>
           {pct < 100 && (
             // The AI is now instructed to cover every section (including
@@ -248,15 +374,27 @@ export default function FinancialModelPanel({ extraction, model, onProceed }) {
             // fully confirmed when the panel above it is visibly still
             // showing "waiting..." rows.
             <p style={{ fontSize: '11px', color: 'var(--text-warning, #b45309)', margin: '0 0 10px' }}>
-              {allRows.length - confirmedCount} field{allRows.length - confirmedCount === 1 ? '' : 's'} above are still unconfirmed ({pct}% complete) - valuation will use defaults for those until you fill them in.
+              {allRows.length - confirmedCount} field{allRows.length - confirmedCount === 1 ? '' : 's'} above are still unconfirmed ({pct}% complete) - the report and valuation will use defaults for those until you fill them in.
             </p>
           )}
-          <button onClick={onProceed} style={{
-            padding: '10px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '500',
-            background: '#16a34a', color: '#fff', border: 'none', cursor: 'pointer',
-          }}>Proceed to valuation →</button>
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+            {!report && (
+              <button onClick={handleGenerateReport} disabled={generating} style={{
+                padding: '10px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '500',
+                background: generating ? 'var(--surface-3)' : '#16a34a', color: generating ? 'var(--text-muted)' : '#fff',
+                border: 'none', cursor: generating ? 'default' : 'pointer',
+              }}>{generating ? 'Preparing your report...' : 'Generate my AI Financial Model Report'}</button>
+            )}
+            <button onClick={onProceed} style={{
+              padding: '10px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '500',
+              background: 'transparent', color: 'var(--text-success)', border: '1px solid var(--border-success)', cursor: 'pointer',
+            }}>Use this model for valuation →</button>
+          </div>
+          {genError && <p style={{ fontSize: '11px', color: '#dc2626', margin: '10px 0 0' }}>{genError}</p>}
         </div>
       )}
+
+      {report && <FinancialReportPreview report={report} panelCompletionPct={pct} />}
     </div>
   );
 }
