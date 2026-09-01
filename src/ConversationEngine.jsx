@@ -111,6 +111,7 @@ export default function ConversationEngine({
   var pendingPhaseSt = useState(null), pendingPhase = pendingPhaseSt[0], setPendingPhase = pendingPhaseSt[1];
 
   var scrollRef = useRef(null);
+  var textareaRef = useRef(null);
   var prevPhaseRef = useRef(convPhase);
   var mountedRef = useRef(true);
   // Synchronous re-entrancy lock for sendMessage. `loading` state is not
@@ -305,6 +306,18 @@ export default function ConversationEngine({
     return function () { clearTimeout(t); };
   }, [messages, loading]);
 
+  // --- Auto-grow the compose box as the user types, capped at ~6 lines so
+  // it can never swallow the message list above it. Reset to `auto` first
+  // on every keystroke so deleting text shrinks the box back down too, not
+  // just growing.
+  useEffect(function () {
+    var el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    var next = Math.min(el.scrollHeight, 132);
+    el.style.height = next + 'px';
+  }, [input]);
+
   // --- External context injection (listing click -> chat) -----------------
   var lastInjectKeyRef = useRef(null);
   useEffect(function () {
@@ -426,26 +439,36 @@ export default function ConversationEngine({
       {/* Input */}
       <div style={{ padding: '14px 18px 18px', borderTop: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
         <div style={{
-          display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.08)',
-          border: '1px solid rgba(255,255,255,0.15)', borderRadius: '999px', padding: '4px 4px 4px 16px',
+          display: 'flex', alignItems: 'flex-end', gap: '8px', background: 'rgba(255,255,255,0.08)',
+          border: '1px solid rgba(255,255,255,0.15)', borderRadius: '22px', padding: '6px 6px 6px 16px',
         }}>
-          <input
-            type="text"
+          <textarea
+            ref={textareaRef}
+            rows={1}
             value={input}
             disabled={restoring}
             onChange={function (e) { setInput(e.target.value); }}
-            onKeyDown={function (e) { if (e.key === 'Enter') sendMessage(); }}
-            placeholder="Type your message..."
+            onKeyDown={function (e) {
+              // Enter sends; Shift+Enter (or Cmd/Ctrl+Enter) inserts a real
+              // newline instead - standard modern chat-UI convention, and
+              // what the user asked for ("unable to go to the next line").
+              if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
+            placeholder="Type your message... (Shift+Enter for a new line)"
             style={{
               flex: 1, border: 'none', outline: 'none', background: 'transparent', color: '#fff',
-              fontSize: '13px', padding: '9px 0',
+              fontSize: '13px', padding: '9px 0', resize: 'none', overflowY: 'auto',
+              maxHeight: '132px', lineHeight: '1.5', fontFamily: 'inherit',
             }}
           />
           <button
             onClick={function () { sendMessage(); }}
             disabled={restoring || loading || !input.trim()}
             style={{
-              width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0, border: 'none',
+              width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0, border: 'none', marginBottom: '3px',
               background: restoring || loading || !input.trim() ? 'rgba(255,255,255,0.15)' : '#2563eb', color: '#fff',
               cursor: restoring || loading || !input.trim() ? 'default' : 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px',
