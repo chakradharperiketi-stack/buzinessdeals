@@ -8,11 +8,13 @@ import { SAMPLE_LISTINGS } from './lib/sampleListings';
 var MAX_ANON_EXCHANGES = 5;
 
 var SUGGESTED_PROMPTS = [
-  'I want to sell my business',
-  "I'm looking to buy a business",
   'What is my business worth?',
-  'I want to invest in a growing company',
+  'Show me businesses for sale in Hyderabad',
+  'I need a FEMA valuation',
+  'How does this platform work?',
 ];
+
+var TRUST_BADGES = ['Damodaran India data', 'Minutes, not weeks', 'CA-grade tools', 'Zenius Advisors'];
 
 // Pathway 1 (direct discovery) categories - clicking one both filters the
 // grid and seeds the AI conversation with context, per spec section 2.
@@ -68,14 +70,25 @@ export default function LandingPage({ sessionId }) {
   var leadSubmittedSt = useState(false), leadSubmitted = leadSubmittedSt[0], setLeadSubmitted = leadSubmittedSt[1];
 
   var scrollRef = useRef(null);
+  var heroInputRef = useRef(null);
   var atLimit = exchangeCount >= MAX_ANON_EXCHANGES;
-  // Visual priority is mutually exclusive: either the advisor has focus, or
-  // the discovery panel does (browsing a category / a specific listing).
-  // Never both at once - that's the ambiguity the redesign is meant to fix.
+  // Visual priority leans toward whichever the user touched most recently,
+  // but it is never a LOCK - the chat's own input stays clickable/typeable
+  // at all times, no matter what else is dimmed. (Previously the whole
+  // hero, including its own input, went pointer-events:none while
+  // "browsing" was active, which meant clicking back into the chat did
+  // nothing - the only way out was the one category chip that happened to
+  // toggle back to null. Visual de-emphasis must never disable input.)
   var isChatting = messages.length > 0;
   var isBrowsing = !!activeCategory || !!exploring;
   var chatHasFocus = isChatting && !isBrowsing;
   var discoveryHasFocus = isBrowsing;
+
+  // Clicking/focusing back into the advisor always wins - reclaims focus
+  // immediately instead of requiring a message to actually be sent first.
+  function reclaimChatFocus() {
+    if (isBrowsing) { setActiveCategory(null); setExploring(null); }
+  }
 
   var filteredListings = activeCategory
     ? listings.filter(function (l) { return (l.sector || '').toLowerCase().indexOf(activeCategory.toLowerCase()) !== -1; })
@@ -99,6 +112,15 @@ export default function LandingPage({ sessionId }) {
       }, 50);
     }
   }, [messages, loading]);
+
+  // Auto-grow the hero compose box, capped so it never dominates the card.
+  useEffect(function () {
+    var el = heroInputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    var next = Math.min(el.scrollHeight, 120);
+    el.style.height = next + 'px';
+  }, [input]);
 
   function resetConversation() {
     setMessages([]);
@@ -189,6 +211,7 @@ export default function LandingPage({ sessionId }) {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--surface-0)' }}>
+      <style>{'html { scroll-behavior: smooth; }'}</style>
       {authModal && <AuthModal mode={authModal} onClose={function () { setAuthModal(null); }} />}
 
       {/* ===== 1. NAVIGATION ===== */}
@@ -202,10 +225,13 @@ export default function LandingPage({ sessionId }) {
           </div>
           <span style={{ fontSize: '15px', fontWeight: '600', color: '#fff' }}>buzinessdeals.com</span>
         </div>
-        <div style={{ display: 'flex', gap: '24px', alignItems: 'center' }} className="bd-nav-links">
+        <div style={{ display: 'flex', gap: '22px', alignItems: 'center' }} className="bd-nav-links">
           <a href="#listings" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>Browse listings</a>
           <a href="#how-it-works" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>How it works</a>
+          <a href="#for-investors" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>For investors</a>
+          <a href="#professional-tools" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>AI model & valuation</a>
           <a href="#pricing" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>Pricing</a>
+          <a href="#contact" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>Contact us</a>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button onClick={function () { setAuthModal('signin'); }} style={{
@@ -223,120 +249,213 @@ export default function LandingPage({ sessionId }) {
       <section style={{
         background: 'linear-gradient(180deg, #0f172a, #1e293b)', padding: '56px 20px 40px',
         display: 'flex', flexDirection: 'column', alignItems: 'center',
-        filter: discoveryHasFocus ? 'blur(3px)' : 'none',
-        opacity: discoveryHasFocus ? 0.45 : 1,
-        pointerEvents: discoveryHasFocus ? 'none' : 'auto',
+        filter: discoveryHasFocus ? 'blur(2px)' : 'none',
+        opacity: discoveryHasFocus ? 0.55 : 1,
         transition: 'filter 0.3s, opacity 0.3s',
       }}>
-        <p style={{ fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#60a5fa', margin: '0 0 12px', fontWeight: '600' }}>
-          India's first AI-powered business marketplace
-        </p>
-        <h1 style={{
-          fontSize: 'clamp(26px, 4vw, 40px)', fontWeight: '700', color: '#fff', textAlign: 'center',
-          margin: '0 0 12px', maxWidth: '720px', lineHeight: '1.25',
-        }}>
-          Buy, Sell or Invest in Indian Businesses
-        </h1>
-        <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.6)', textAlign: 'center', margin: '0 0 32px', maxWidth: '560px' }}>
-          Talk to our AI Business Advisor — get intelligent guidance on buying, selling, investing in, or valuing a business.
-        </p>
+        {!isChatting && (
+          <>
+            <p style={{ fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#60a5fa', margin: '0 0 12px', fontWeight: '600' }}>
+              India's first AI-powered business marketplace
+            </p>
+            <h1 style={{
+              fontSize: 'clamp(26px, 4vw, 40px)', fontWeight: '700', color: '#fff', textAlign: 'center',
+              margin: '0 0 12px', maxWidth: '720px', lineHeight: '1.25',
+            }}>
+              Buy, Sell or Invest in Indian Businesses
+            </h1>
+            <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.6)', textAlign: 'center', margin: '0 0 32px', maxWidth: '560px' }}>
+              Talk to our AI Business Advisor — get intelligent guidance on buying, selling, investing in, or valuing a business.
+            </p>
+          </>
+        )}
 
         <div style={{ width: '100%', maxWidth: '680px' }}>
-          <div style={{
-            background: '#ffffff', borderRadius: '999px', padding: '6px 6px 6px 22px',
-            display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 12px 32px rgba(0,0,0,0.35)',
-          }}>
-            <input
-              type="text"
-              value={input}
-              disabled={atLimit}
-              onChange={function (e) { setInput(e.target.value); }}
-              onKeyDown={function (e) { if (e.key === 'Enter') sendMessage(); }}
-              placeholder={atLimit ? 'Create an account to continue...' : 'Tell us what you want to do...'}
-              style={{ flex: 1, border: 'none !important', outline: 'none', fontSize: '14px', padding: '10px 0' }}
-            />
-            <button
-              onClick={function () { sendMessage(); }}
-              disabled={atLimit || loading || !input.trim()}
-              style={{
-                width: '40px', height: '40px', borderRadius: '50%', flexShrink: 0, border: 'none',
-                background: atLimit || loading || !input.trim() ? '#c4cdd9' : '#2563eb', color: '#fff',
-                cursor: atLimit || loading || !input.trim() ? 'default' : 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px',
-              }}
-            >→</button>
-          </div>
-
           {!isChatting && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', marginTop: '16px' }}>
-              {SUGGESTED_PROMPTS.map(function (p) {
-                return (
-                  <button key={p} onClick={function () { sendMessage(p); }} style={{
-                    background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
-                    color: 'rgba(255,255,255,0.85)', fontSize: '12px', padding: '8px 14px',
-                    borderRadius: '999px', cursor: 'pointer',
-                  }}>{p}</button>
-                );
-              })}
-            </div>
+            <>
+              <div style={{
+                background: '#ffffff', borderRadius: '20px', padding: '10px 10px 10px 20px',
+                display: 'flex', alignItems: 'flex-end', gap: '10px', boxShadow: '0 12px 32px rgba(0,0,0,0.35)',
+                border: '1px solid rgba(255,255,255,0.6)',
+              }}>
+                <i className="ti ti-search" aria-hidden="true" style={{ fontSize: '16px', color: '#94a3b8', marginBottom: '11px' }} />
+                <textarea
+                  ref={heroInputRef}
+                  rows={1}
+                  value={input}
+                  disabled={atLimit}
+                  onFocus={reclaimChatFocus}
+                  onChange={function (e) { setInput(e.target.value); }}
+                  onKeyDown={function (e) {
+                    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); sendMessage(); }
+                  }}
+                  placeholder={atLimit ? 'Create an account to continue...' : 'Ask me anything — sell my business, invest in a company, get a FEMA valuation...'}
+                  style={{
+                    flex: 1, border: 'none', outline: 'none', fontSize: '14px', padding: '9px 0',
+                    resize: 'none', overflowY: 'auto', maxHeight: '120px', lineHeight: '1.5', fontFamily: 'inherit',
+                  }}
+                />
+                <button
+                  onClick={function () { sendMessage(); }}
+                  disabled={atLimit || loading || !input.trim()}
+                  style={{
+                    flexShrink: 0, border: 'none', borderRadius: '14px', padding: '11px 18px',
+                    background: atLimit || loading || !input.trim() ? '#c4cdd9' : '#2563eb', color: '#fff',
+                    cursor: atLimit || loading || !input.trim() ? 'default' : 'pointer',
+                    display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '600',
+                  }}
+                >Ask <span aria-hidden="true">→</span></button>
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', marginTop: '16px' }}>
+                {SUGGESTED_PROMPTS.map(function (p) {
+                  return (
+                    <button key={p} onClick={function () { sendMessage(p); }} style={{
+                      background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+                      color: 'rgba(255,255,255,0.85)', fontSize: '12px', padding: '8px 14px',
+                      borderRadius: '999px', cursor: 'pointer',
+                    }}>{p}</button>
+                  );
+                })}
+              </div>
+
+              <div style={{
+                display: 'flex', flexWrap: 'wrap', gap: '18px', justifyContent: 'center',
+                marginTop: '26px', paddingTop: '18px', borderTop: '1px solid rgba(255,255,255,0.08)',
+              }}>
+                {TRUST_BADGES.map(function (b, i) {
+                  return (
+                    <span key={b} style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
+                      <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', fontWeight: '500' }}>{b}</span>
+                      {i < TRUST_BADGES.length - 1 && <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'rgba(255,255,255,0.25)' }} />}
+                    </span>
+                  );
+                })}
+              </div>
+            </>
           )}
 
           {isChatting && (
-            <div style={{
-              marginTop: '20px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: '16px', padding: '16px', maxHeight: '420px', overflowY: 'auto',
-            }} ref={scrollRef}>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
-                <button onClick={resetConversation} style={{
+            <div
+              onFocus={reclaimChatFocus}
+              style={{
+                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: '18px', display: 'flex', flexDirection: 'column',
+                height: 'min(560px, 72vh)', overflow: 'hidden',
+              }}
+            >
+              {/* Card header - persona pill stays visible even when scrolled */}
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.1)', flexShrink: 0,
+              }}>
+                <span style={{
+                  display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: '600', color: '#fff',
+                }}>
+                  <span style={{
+                    width: '22px', height: '22px', borderRadius: '50%', background: 'rgba(37,99,235,0.35)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: '700', color: '#93c5fd',
+                  }}>AI</span>
+                  Business Advisor
+                </span>
+                <button onClick={resetConversation} title="Clear conversation and start over" style={{
                   fontSize: '11px', color: 'rgba(255,255,255,0.5)', background: 'transparent',
                   border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer',
-                }}>Clear conversation</button>
+                }}>Clear conversation and start over</button>
               </div>
-              {messages.map(function (m, i) {
-                var isUser = m.role === 'user';
-                return (
-                  <div key={i} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: '10px' }}>
-                    <div style={{
-                      maxWidth: '85%', padding: '10px 14px', borderRadius: isUser ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
-                      fontSize: '13px', lineHeight: '1.55', whiteSpace: 'pre-wrap',
-                      background: isUser ? '#2563eb' : 'rgba(255,255,255,0.1)',
-                      color: '#fff',
-                    }}>{m.text}</div>
+
+              {/* Transcript - grows, scrolls; input stays pinned below */}
+              <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+                {messages.map(function (m, i) {
+                  var isUser = m.role === 'user';
+                  return (
+                    <div key={i} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: '10px', gap: '8px' }}>
+                      {!isUser && (
+                        <span style={{
+                          width: '22px', height: '22px', borderRadius: '50%', background: 'rgba(37,99,235,0.35)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: '700',
+                          color: '#93c5fd', flexShrink: 0, marginTop: '2px',
+                        }}>AI</span>
+                      )}
+                      <div style={{
+                        maxWidth: '82%', padding: '10px 14px', borderRadius: isUser ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
+                        fontSize: '13px', lineHeight: '1.55', whiteSpace: 'pre-wrap',
+                        background: isUser ? '#2563eb' : 'rgba(255,255,255,0.1)',
+                        color: '#fff',
+                      }}>{m.text}</div>
+                    </div>
+                  );
+                })}
+                {loading && (
+                  <div style={{ display: 'flex', gap: '4px', padding: '4px 14px' }}>
+                    {[0, 1, 2].map(function (i) {
+                      return <span key={i} style={{
+                        width: '5px', height: '5px', borderRadius: '50%', background: 'rgba(255,255,255,0.6)',
+                        animation: 'pulse 1.2s infinite', animationDelay: (i * 0.2) + 's',
+                      }} />;
+                    })}
                   </div>
-                );
-              })}
-              {loading && (
-                <div style={{ display: 'flex', gap: '4px', padding: '4px 14px' }}>
-                  {[0, 1, 2].map(function (i) {
-                    return <span key={i} style={{
-                      width: '5px', height: '5px', borderRadius: '50%', background: 'rgba(255,255,255,0.6)',
-                      animation: 'pulse 1.2s infinite', animationDelay: (i * 0.2) + 's',
-                    }} />;
-                  })}
-                </div>
-              )}
+                )}
 
-              {lastAction && !atLimit && (
-                <div style={{ marginTop: '6px' }}>
-                  <button onClick={handleActionClick} style={{
-                    background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px',
-                    padding: '10px 16px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
-                  }}>{lastAction.label || 'Continue →'}</button>
-                </div>
-              )}
+                {lastAction && !atLimit && (
+                  <div style={{ marginTop: '6px' }}>
+                    <button onClick={handleActionClick} style={{
+                      background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px',
+                      padding: '10px 16px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
+                    }}>{lastAction.label || 'Continue →'}</button>
+                  </div>
+                )}
 
-              {atLimit && (
-                <div style={{
-                  marginTop: '10px', padding: '16px', background: 'rgba(37,99,235,0.15)',
-                  border: '1px solid rgba(96,165,250,0.4)', borderRadius: '12px',
-                }}>
-                  <p style={{ fontSize: '13px', color: '#fff', lineHeight: '1.6', margin: '0 0 12px' }}>
-                    I have a good picture of your situation. To continue and get specific recommendations - create a free account. Your conversation will be saved exactly where we left off.
-                  </p>
-                  <button onClick={function () { setAuthModal('signup'); }} style={{
-                    background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px',
-                    padding: '10px 18px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
-                  }}>Create free account →</button>
+                {atLimit && (
+                  <div style={{
+                    marginTop: '10px', padding: '16px', background: 'rgba(37,99,235,0.15)',
+                    border: '1px solid rgba(96,165,250,0.4)', borderRadius: '12px',
+                  }}>
+                    <p style={{ fontSize: '13px', color: '#fff', lineHeight: '1.6', margin: '0 0 12px' }}>
+                      I have a good picture of your situation. To continue and get specific recommendations - create a free account. Your conversation will be saved exactly where we left off.
+                    </p>
+                    <button onClick={function () { setAuthModal('signup'); }} style={{
+                      background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px',
+                      padding: '10px 18px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
+                    }}>Create free account →</button>
+                  </div>
+                )}
+              </div>
+
+              {/* Follow-up input, pinned at the bottom of the same card */}
+              {!atLimit && (
+                <div style={{ padding: '10px 12px 12px', borderTop: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'flex-end', gap: '8px', background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.15)', borderRadius: '18px', padding: '5px 5px 5px 14px',
+                  }}>
+                    <textarea
+                      ref={heroInputRef}
+                      rows={1}
+                      value={input}
+                      onFocus={reclaimChatFocus}
+                      onChange={function (e) { setInput(e.target.value); }}
+                      onKeyDown={function (e) {
+                        if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); sendMessage(); }
+                      }}
+                      placeholder="Type your message... (Shift+Enter for a new line)"
+                      style={{
+                        flex: 1, border: 'none', outline: 'none', background: 'transparent', color: '#fff',
+                        fontSize: '13px', padding: '8px 0', resize: 'none', overflowY: 'auto',
+                        maxHeight: '110px', lineHeight: '1.5', fontFamily: 'inherit',
+                      }}
+                    />
+                    <button
+                      onClick={function () { sendMessage(); }}
+                      disabled={loading || !input.trim()}
+                      style={{
+                        width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0, border: 'none', marginBottom: '2px',
+                        background: loading || !input.trim() ? 'rgba(255,255,255,0.15)' : '#2563eb', color: '#fff',
+                        cursor: loading || !input.trim() ? 'default' : 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px',
+                      }}
+                    >→</button>
+                  </div>
                 </div>
               )}
             </div>
@@ -471,7 +590,7 @@ export default function LandingPage({ sessionId }) {
       </section>
 
       {/* ===== 5. FOR INVESTORS ===== */}
-      <section style={{ background: '#0f172a', padding: '56px 24px' }}>
+      <section id="for-investors" style={{ background: '#0f172a', padding: '56px 24px' }}>
         <div style={{ maxWidth: '1180px', margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '32px', alignItems: 'center' }}>
           <div>
             <p style={{ fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#60a5fa', margin: '0 0 10px', fontWeight: '600' }}>For investors</p>
@@ -501,7 +620,7 @@ export default function LandingPage({ sessionId }) {
       </section>
 
       {/* ===== 6. PROFESSIONAL TOOLS ===== */}
-      <section style={{ padding: '48px 24px', maxWidth: '1180px', margin: '0 auto' }}>
+      <section id="professional-tools" style={{ padding: '48px 24px', maxWidth: '1180px', margin: '0 auto' }}>
         <h2 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 6px' }}>Professional tools</h2>
         <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 24px' }}>Built for CAs, CMAs, CS and Registered Valuers working with clients.</p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
@@ -577,7 +696,7 @@ export default function LandingPage({ sessionId }) {
       </section>
 
       {/* ===== 8. NEED EXPERT HELP ===== */}
-      <section style={{ padding: '48px 24px', maxWidth: '680px', margin: '0 auto' }}>
+      <section id="contact" style={{ padding: '48px 24px', maxWidth: '680px', margin: '0 auto' }}>
         <h2 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)', textAlign: 'center', margin: '0 0 6px' }}>Need expert help?</h2>
         <p style={{ fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center', margin: '0 0 24px' }}>Tell us what you need and a Zenius Advisors CA will call you back.</p>
 
