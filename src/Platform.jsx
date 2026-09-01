@@ -90,13 +90,33 @@ function NavBar({ user, isAdmin, onHome, onGoListings, onSignOut }) {
   );
 }
 
-function HomeScreen({ onCard, loadingKey }) {
+function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel }) {
   var hour = new Date().getHours();
   var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  // Resume affordance - without this, a returning user with a saved
+  // interview/model/report in progress has no way to know it, and lands on
+  // the same blank 3-card picker as a brand-new visitor every time.
+  var hasExtraction = !!(convExtraction && Object.keys(convExtraction).length > 0);
+  var hasDraft = !!(report || convModel || hasExtraction);
+  var bizName = (convExtraction && convExtraction.businessProfile && convExtraction.businessProfile.name) || 'Your business';
+  var statusLabel = report ? 'Financial model report ready' : convModel ? 'Model complete - report not generated yet' : 'Interview in progress';
   return (
     <div style={{ padding: '32px', maxWidth: '760px', margin: '0 auto' }}>
       <h1 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 4px' }}>{greeting}.</h1>
       <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 28px' }}>What would you like to do today?</p>
+      {hasDraft && (
+        <button onClick={function () { onCard('analyst'); }} style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
+          textAlign: 'left', padding: '16px 20px', borderRadius: '14px', border: '1px solid var(--border-accent)',
+          background: 'var(--bg-accent)', cursor: 'pointer', marginBottom: '20px',
+        }}>
+          <div>
+            <p style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-accent)', margin: '0 0 3px' }}>Continue: {bizName}</p>
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>{statusLabel}</p>
+          </div>
+          <i className="ti ti-arrow-right" aria-hidden="true" style={{ fontSize: '16px', color: 'var(--text-accent)', flexShrink: 0 }} />
+        </button>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
         {ACTION_CARDS.map(function (c) {
           var isLoading = loadingKey === c.key;
@@ -140,7 +160,7 @@ function ComingNextPanel({ title, note }) {
 function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, cardLoading, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange }) {
   return (
     <div style={{ width: '65%', flex: 1, height: '100%', overflowY: 'auto', background: 'var(--surface-0)' }}>
-      {convPhase === 'discovery' && <HomeScreen onCard={onCard} loadingKey={cardLoading} />}
+      {convPhase === 'discovery' && <HomeScreen onCard={onCard} loadingKey={cardLoading} report={report} convExtraction={convExtraction} convModel={convModel} />}
 
       {convPhase === 'valuation' && (
         <ValuationPlatform
