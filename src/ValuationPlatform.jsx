@@ -632,7 +632,9 @@ function S3_Forecast({f,setF,years,onNext}){
   return <div>
     <div style={{display:"flex",alignItems:"center",gap:"12px",marginBottom:"14px",flexWrap:"wrap"}}>
       <div><label style={lbl}>Unit</label>
-        <select value={u} onChange={e=>setF({...f,unit:e.target.value})} style={{...base_inp,width:"120px"}}>{UNIT_OPTS.map(x=><option key={x}>{x}</option>)}</select></div>
+        {/* UNIT_OPTS never existed in this file - UNIT_MULT (line 11) is the
+            actual canonical list of units; its keys are the valid options. */}
+        <select value={u} onChange={e=>setF({...f,unit:e.target.value})} style={{...base_inp,width:"120px"}}>{Object.keys(UNIT_MULT).map(x=><option key={x}>{x}</option>)}</select></div>
       <div><label style={lbl}>Forecast period</label>
         <select value={f.forecastPeriod} onChange={e=>setF({...f,forecastPeriod:parseInt(e.target.value)})} style={{...base_inp,width:"100px"}}>{FORECAST_OPTS.map(x=><option key={x} value={x}>{x} years</option>)}</select></div>
       <div><label style={lbl}>Tax rate (%)</label>
