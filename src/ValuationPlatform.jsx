@@ -1965,8 +1965,19 @@ function ValuationPlatform(props){
   // fresh analyst -> valuation handoff, since none is created in that flow)
   // - so every keystroke here was living in this component's memory alone
   // and vanished on any remount, ErrorBoundary reset included.
+  //
+  // Gated on form.engagementType: this effect also fires on first mount,
+  // and while the engagement-type picker is still showing (form still just
+  // the bare initForm() default, engagementType unset), syncing it up would
+  // overwrite Platform.jsx's sellerForm with an incomplete object. Once that
+  // happens it self-reinforces - Platform's "already have a sellerForm, skip
+  // the profile-based rebuild" guard (handlePhaseChange) sees this stale
+  // object as truthy and never rebuilds it, so the picker keeps coming back
+  // on every future visit, permanently, even after the button that reaches
+  // this screen is fixed to pre-fetch correctly. Only mirror the form once
+  // it's actually past the picker.
   useEffect(function(){
-    if(props.onFormChange) props.onFormChange(form);
+    if(props.onFormChange && form.engagementType) props.onFormChange(form);
   },[form]);
 
   const years=useMemo(()=>getDynamicYears(form.forecastPeriod),[form.forecastPeriod]);
