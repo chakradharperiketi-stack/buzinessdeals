@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ValuationPlatform, CreateListingModal } from './ValuationPlatform';
 import ConversationEngine from './ConversationEngine';
-import FinancialModelPanel from './FinancialModelPanel';
+import FinancialModelPanel, { computeCompletionPct } from './FinancialModelPanel';
 import AcquisitionBriefPanel from './AcquisitionBriefPanel';
 import BuyerListingsPanel from './BuyerListingsPanel';
 import { computeModel } from './lib/financialModel';
@@ -98,8 +98,9 @@ function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel }) {
   // the same blank 3-card picker as a brand-new visitor every time.
   var hasExtraction = !!(convExtraction && Object.keys(convExtraction).length > 0);
   var hasDraft = !!(report || convModel || hasExtraction);
-  var bizName = (convExtraction && convExtraction.businessProfile && convExtraction.businessProfile.name) || 'Your business';
-  var statusLabel = report ? 'Financial model report ready' : convModel ? 'Model complete - report not generated yet' : 'Interview in progress';
+  var bizName = (convExtraction && convExtraction.businessProfile && convExtraction.businessProfile.name) || (convExtraction && convExtraction.businessProfile && convExtraction.businessProfile.businessType) || 'Your business';
+  var statusLabel = report ? 'Report ready' : convModel ? 'Model complete - report not generated yet' : 'Interview in progress';
+  var draftPct = hasDraft ? computeCompletionPct(convModel || convExtraction) : 0;
   return (
     <div style={{ padding: '32px', maxWidth: '760px', margin: '0 auto' }}>
       <h1 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 4px' }}>{greeting}.</h1>
@@ -112,7 +113,7 @@ function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel }) {
         }}>
           <div>
             <p style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-accent)', margin: '0 0 3px' }}>Continue: {bizName}</p>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>{statusLabel}</p>
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>{statusLabel} · {draftPct}% of fields confirmed</p>
           </div>
           <i className="ti ti-arrow-right" aria-hidden="true" style={{ fontSize: '16px', color: 'var(--text-accent)', flexShrink: 0 }} />
         </button>
@@ -228,6 +229,39 @@ function savePlatformState(sessionId, state) {
   }
 }
 
+// Deep, non-destructive merge used only when loading a project's saved
+// state (see the useEffect below) - a value present in `next` only ever
+// overwrites `prior` when it's actually non-empty, checked all the way
+// down, not just at the top level. Mirrors the same principle as
+// ai-search-v2's mergeExtraction (never let an emptier turn silently erase
+// real data from an earlier one) but goes one level deeper - a shallow
+// merge would still let a later row's sparsely-filled businessProfile
+// object (e.g. only businessType known) wholesale-overwrite an earlier
+// row's fully-filled one, which is exactly the "lost data" bug this fixes.
+function isEmptyMergeValue(v) {
+  if (v == null || v === '') return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === 'object') return Object.keys(v).length === 0;
+  return false;
+}
+function deepMergeExtraction(prior, next) {
+  if (isEmptyMergeValue(next)) return prior;
+  if (isEmptyMergeValue(prior)) return next;
+  if (Array.isArray(next) || Array.isArray(prior)) {
+    // No stable identity across two sessions' segment/lineItem arrays to
+    // merge element-by-element - the fuller array is the safer bet.
+    return (Array.isArray(next) ? next.length : 0) >= (Array.isArray(prior) ? prior.length : 0) ? next : prior;
+  }
+  if (typeof next === 'object' && typeof prior === 'object') {
+    var merged = Object.assign({}, prior);
+    Object.keys(next).forEach(function (key) {
+      merged[key] = deepMergeExtraction(prior[key], next[key]);
+    });
+    return merged;
+  }
+  return next;
+}
+
 function clearPlatformState(sessionId) {
   if (!sessionId || typeof localStorage === 'undefined') return;
   try {
@@ -283,20 +317,31 @@ export default function Platform({ user, sessionId, onSignOut }) {
         if (cancelled || !project) return;
         setProjectId(project.id);
         return Promise.all([
-          supabase.from('ai_conversations').select('extraction, model, brief').eq('project_id', project.id).order('updated_at', { ascending: false }).limit(1).maybeSingle(),
+          // Every conversation row this project has, not just the most
+          // recently touched one. backfill_projects.sql links ALL of an
+          // account's pre-existing session rows to a single project, and
+          // "most recently updated" is not the same as "most complete" - a
+          // later throwaway test session (near-empty extraction) can
+          // outrank the real finished interview purely on timestamp,
+          // which is exactly the "lost data" bug reported after the first
+          // backfill run. Fetch them all, oldest first, and deep-merge -
+          // see deepMergeExtraction above.
+          supabase.from('ai_conversations').select('extraction, model, brief').eq('project_id', project.id).order('updated_at', { ascending: true }),
           supabase.from('financial_model_reports').select('*').eq('project_id', project.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
         ]).then(function (results) {
           if (cancelled) return;
-          var convRow = results[0] && results[0].data;
+          var convRows = (results[0] && results[0].data) || [];
           var reportRow = results[1] && results[1].data;
+          var mergedExtraction = convRows.reduce(function (acc, row) { return deepMergeExtraction(acc, row.extraction); }, null);
+          var mergedModel = convRows.reduce(function (acc, row) { return deepMergeExtraction(acc, row.model); }, null);
+          var mergedBrief = convRows.reduce(function (acc, row) { return deepMergeExtraction(acc, row.brief); }, null);
           // Supabase is authoritative once it resolves - overwrite whatever
-          // the localStorage seed painted, don't merge (a stale local copy
-          // should never win over the account's real saved state).
-          if (convRow) {
-            if (convRow.extraction) setConvExtraction(convRow.extraction);
-            if (convRow.model) setConvModel(convRow.model);
-            if (convRow.brief) setBrief(convRow.brief);
-          }
+          // the localStorage seed painted, don't merge with it (a stale
+          // local copy should never win over the account's real saved
+          // state).
+          if (mergedExtraction) setConvExtraction(mergedExtraction);
+          if (mergedModel) setConvModel(mergedModel);
+          if (mergedBrief) setBrief(mergedBrief);
           if (reportRow) setReport(reportRow);
         });
       })
