@@ -44,6 +44,18 @@ function fmtYears(v) {
 // rows (revenue segments, cost line items) expand to one row per item so
 // the panel visibly grows as the interview progresses - the same "watch it
 // fill in live" behaviour the spec describes.
+// Exported so Platform.jsx's HomeScreen resume banner can show the same
+// completion percentage without re-implementing (and risking drift from)
+// this logic - single source of truth for "how done is this model."
+export function computeCompletionPct(data) {
+  if (!data) return 0;
+  var sections = buildSections(data);
+  var allRows = sections.reduce(function (acc, s) { return acc.concat(s.rows); }, []);
+  if (!allRows.length) return 0;
+  var confirmedCount = allRows.filter(function (r) { return r.confirmed; }).length;
+  return Math.round((confirmedCount / allRows.length) * 100);
+}
+
 function buildSections(data) {
   var bp = (data && data.businessProfile) || {};
   var rev = (data && data.revenue) || {};
@@ -306,6 +318,13 @@ export default function FinancialModelPanel({ extraction, model, onProceed, sess
 
   var generatingSt = useState(false), generating = generatingSt[0], setGenerating = generatingSt[1];
   var genErrorSt = useState(''), genError = genErrorSt[0], setGenError = genErrorSt[1];
+  // Once a report exists, the field-by-field checklist has done its job (it
+  // exists to make the live interview feel like it's "filling in" - see the
+  // file header comment) and showing it wide open above a finished report
+  // just reads as "this is all still waiting", even when it isn't. Default
+  // it collapsed whenever there's a report to lead with instead; still
+  // openable for anyone who wants the underlying data breakdown.
+  var showBreakdownSt = useState(!report), showBreakdown = showBreakdownSt[0], setShowBreakdown = showBreakdownSt[1];
 
   function handleGenerateReport() {
     if (generating || !model) return;
@@ -336,30 +355,22 @@ export default function FinancialModelPanel({ extraction, model, onProceed, sess
     );
   }
 
+  var bp = (data && data.businessProfile) || {};
+  var displayName = bp.name || bp.businessType || 'Your business';
+  var statusLabel = report ? 'Report ready' : isComplete ? 'Model complete - report not generated yet' : 'Interview in progress';
+  var statusColor = report ? 'var(--text-success)' : isComplete ? 'var(--text-accent)' : 'var(--text-muted)';
+
   return (
     <div style={{ padding: '28px 32px', maxWidth: '640px', margin: '0 auto' }}>
+      {/* Leads with status, not a checklist - a returning user with a
+          finished report should see "here's your report", not a wall of
+          "waiting..." rows for fields the report has already used. */}
       <div style={{ marginBottom: '18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-          <p style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', margin: 0 }}>Financial model progress</p>
-          <span style={{ fontSize: '12px', color: 'var(--text-accent)', fontWeight: '600' }}>{pct}%</span>
-        </div>
-        <div style={{ height: '6px', background: 'var(--surface-1)', borderRadius: '3px', overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: pct + '%', background: 'var(--text-accent)', borderRadius: '3px', transition: 'width 0.4s' }} />
-        </div>
+        <p style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 3px' }}>{displayName}</p>
+        <p style={{ fontSize: '12px', color: statusColor, fontWeight: '600', margin: 0 }}>{statusLabel} · {pct}% of fields confirmed</p>
       </div>
 
-      {sections.map(function (s) {
-        return (
-          <div key={s.key}>
-            <SectionCard title={s.title} rows={s.rows} />
-            {s.key === 'revenue' && <MonthlyGrid title="Revenue build-up by service line" buildUp={data && data.capacityBuildUp} lineKey="serviceLines" lineLabelKey="name" />}
-            {s.key === 'costs' && <MonthlyGrid title="Staffing cost by role" buildUp={data && data.staffingBuildUp} lineKey="roles" lineLabelKey="role" />}
-          </div>
-        );
-      })}
-
-      {isComplete && <ProjectionTable computed={computed} />}
-      {isComplete && <MetricsGrid metrics={metrics} />}
+      {report && <FinancialReportPreview report={report} panelCompletionPct={pct} onReportUpdated={onReportGenerated} />}
 
       {isComplete && (
         <div style={{ padding: '16px', background: 'var(--bg-success)', border: '1px solid var(--border-success)', borderRadius: '12px', textAlign: 'center', marginTop: '4px' }}>
@@ -394,7 +405,37 @@ export default function FinancialModelPanel({ extraction, model, onProceed, sess
         </div>
       )}
 
-      {report && <FinancialReportPreview report={report} panelCompletionPct={pct} onReportUpdated={onReportGenerated} />}
+      <button onClick={function () { setShowBreakdown(!showBreakdown); }} style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
+        padding: '10px 4px', marginTop: '18px', background: 'transparent', border: 'none',
+        borderTop: '1px solid var(--border)', cursor: 'pointer', fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)',
+      }}>
+        <span>{showBreakdown ? 'Hide' : 'View'} full data breakdown ({pct}% confirmed)</span>
+        <i className={'ti ' + (showBreakdown ? 'ti-chevron-up' : 'ti-chevron-down')} aria-hidden="true" style={{ fontSize: '14px' }} />
+      </button>
+
+      {showBreakdown && (
+        <div style={{ marginTop: '10px' }}>
+          <div style={{ marginBottom: '18px' }}>
+            <div style={{ height: '6px', background: 'var(--surface-1)', borderRadius: '3px', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: pct + '%', background: 'var(--text-accent)', borderRadius: '3px', transition: 'width 0.4s' }} />
+            </div>
+          </div>
+
+          {sections.map(function (s) {
+            return (
+              <div key={s.key}>
+                <SectionCard title={s.title} rows={s.rows} />
+                {s.key === 'revenue' && <MonthlyGrid title="Revenue build-up by service line" buildUp={data && data.capacityBuildUp} lineKey="serviceLines" lineLabelKey="name" />}
+                {s.key === 'costs' && <MonthlyGrid title="Staffing cost by role" buildUp={data && data.staffingBuildUp} lineKey="roles" lineLabelKey="role" />}
+              </div>
+            );
+          })}
+
+          {isComplete && <ProjectionTable computed={computed} />}
+          {isComplete && <MetricsGrid metrics={metrics} />}
+        </div>
+      )}
     </div>
   );
 }
