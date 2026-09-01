@@ -929,7 +929,16 @@ export default function Platform({ user, sessionId, onSignOut }) {
           onCard={handleCard}
           cardLoading={cardLoading}
           onHomeFromValuation={goHome}
-          onProceedToValuation={function () { setConvPhase('valuation'); }}
+          // Must go through handlePhaseChange, not a bare setConvPhase - that
+          // is the only function that pre-builds sellerForm (from the just-
+          // completed convModel) before landing on 'valuation'. A direct
+          // setConvPhase('valuation') here was the exact "fourth entry
+          // point" the comment above handlePhaseChange warns about: it skips
+          // the pre-fetch, so ValuationPlatform mounts with a null
+          // initialForm and falls back to the legacy "who is performing
+          // this valuation" picker - the screen this button is meant to
+          // skip past, not land on.
+          onProceedToValuation={function () { handlePhaseChange('valuation'); }}
           onBrowseMatched={function () { setConvPhase('listings'); }}
           onAskAiAboutListing={handleAskAiAboutListing}
           onSellerFormChange={setSellerForm}
