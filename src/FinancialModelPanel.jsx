@@ -294,7 +294,7 @@ function SectionCard({ title, rows }) {
   );
 }
 
-export default function FinancialModelPanel({ extraction, model, onProceed, sessionId, userId, report, onReportGenerated }) {
+export default function FinancialModelPanel({ extraction, model, onProceed, sessionId, userId, projectId, report, onReportGenerated }) {
   var data = model || extraction;
   var sections = buildSections(data || {});
   var allRows = sections.reduce(function (acc, s) { return acc.concat(s.rows); }, []);
@@ -311,7 +311,7 @@ export default function FinancialModelPanel({ extraction, model, onProceed, sess
     if (generating || !model) return;
     setGenerating(true);
     setGenError('');
-    generateFinancialReport({ sessionId: sessionId, userId: userId, extraction: model })
+    generateFinancialReport({ sessionId: sessionId, userId: userId, projectId: projectId, extraction: model })
       .then(function (r) {
         setGenerating(false);
         onReportGenerated && onReportGenerated(r);
