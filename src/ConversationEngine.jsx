@@ -126,9 +126,12 @@ export default function ConversationEngine({
   var persona = PERSONAS[convPhase] || PERSONAS.discovery;
 
   // --- Restore conversation from ai_conversations (3s timeout -> greeting) ---
+  // Platform.jsx remounts this whole component on project switch (key=
+  // projectId), so this effect always runs fresh for whichever project is
+  // now active - it just needs to fetch the RIGHT row for that project.
   useEffect(function () {
     mountedRef.current = true;
-    if (!sessionId) {
+    if (!sessionId && !projectId) {
       setMessages([{ role: 'assistant', text: GREETING }]);
       setRestoring(false);
       return;
@@ -142,18 +145,28 @@ export default function ConversationEngine({
       setRestoring(false);
     }, RESTORE_TIMEOUT_MS);
 
-    supabase
-      .from('ai_conversations')
-      .select('messages')
-      .eq('session_id', sessionId)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-      .then(function (res) {
+    // Prefer project_id once one exists (mirrors persistConversation's own
+    // lookup precedence server-side). Fetch every matching row rather than
+    // just the latest - backfill_projects.sql linked ALL of an account's
+    // pre-existing session rows to a single project, and picking "most
+    // recently updated" can land on a near-empty throwaway session instead
+    // of the real transcript (the same class of bug fixed for the
+    // extraction/model data in Platform.jsx). The longest transcript is
+    // the real one; there's no meaningful way to "merge" two chat logs.
+    var query = projectId
+      ? supabase.from('ai_conversations').select('messages').eq('project_id', projectId)
+      : supabase.from('ai_conversations').select('messages').eq('session_id', sessionId).order('updated_at', { ascending: false }).limit(1);
+
+    query.then(function (res) {
         if (settled || !mountedRef.current) return;
         settled = true;
         clearTimeout(timeoutId);
-        var loaded = res.data && res.data.messages;
+        var rows = res.data || [];
+        var best = rows.reduce(function (acc, row) {
+          var len = (row.messages || []).length;
+          return len > (acc ? (acc.messages || []).length : -1) ? row : acc;
+        }, null);
+        var loaded = best && best.messages;
         if (loaded && loaded.length > 0) {
           var normalised = loaded.map(normaliseMessage);
           setMessages(normalised);
@@ -176,7 +189,7 @@ export default function ConversationEngine({
       clearTimeout(timeoutId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId]);
+  }, [sessionId, projectId]);
 
   // --- Shared network dispatch. Every call to ai-search-v2 goes through here
   // - both user-typed messages (sendMessage) and the automatic "kickoff" turn
