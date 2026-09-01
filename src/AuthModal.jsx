@@ -15,6 +15,30 @@ export default function AuthModal({ mode: initialMode = 'signup', onClose }) {
   var errorSt = useState(''), error = errorSt[0], setError = errorSt[1];
   var infoSt = useState(''), info = infoSt[0], setInfo = infoSt[1];
 
+  function handleForgotPassword() {
+    var emailVal = email.trim();
+    if (!emailVal) {
+      setError('Enter your email address first, then click "Forgot password".');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    setInfo('');
+    supabase.auth.resetPasswordForEmail(emailVal, {
+      redirectTo: window.location.origin,
+    }).then(function (res) {
+      setLoading(false);
+      if (res.error) {
+        setError(res.error.message);
+        return;
+      }
+      setInfo('Password reset email sent to ' + emailVal + '. Check your inbox.');
+    }).catch(function () {
+      setLoading(false);
+      setError('Failed to send reset email. Please try again.');
+    });
+  }
+
   function handleSubmit(e) {
     e.preventDefault();
     if (!email || !password) {
@@ -99,6 +123,15 @@ export default function AuthModal({ mode: initialMode = 'signup', onClose }) {
 
           {error && <p style={{ fontSize: '12px', color: 'var(--text-danger)', marginBottom: '12px' }}>{error}</p>}
           {info && <p style={{ fontSize: '12px', color: 'var(--text-success)', marginBottom: '12px' }}>{info}</p>}
+
+          {mode === 'signin' && (
+            <div style={{ textAlign: 'right', marginTop: '-6px', marginBottom: '10px' }}>
+              <button type="button" onClick={handleForgotPassword} style={{
+                fontSize: '12px', color: '#2563eb', background: 'none', border: 'none',
+                cursor: 'pointer', padding: 0, textDecoration: 'underline',
+              }}>Forgot password?</button>
+            </div>
+          )}
 
           <button type="submit" disabled={loading} style={{
             width: '100%', padding: '11px', borderRadius: '8px', fontSize: '14px', fontWeight: '500',
