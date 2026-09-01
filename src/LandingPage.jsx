@@ -650,7 +650,7 @@ export default function LandingPage({ sessionId }) {
         </span>
         <h1 style={{
           fontSize: 'clamp(26px, 4vw, 40px)', fontWeight: '700', color: '#fff', textAlign: 'center',
-          margin: '0 0 12px', maxWidth: '720px', lineHeight: '1.25',
+          margin: '0 0 12px', maxWidth: '1020px', lineHeight: '1.25',
         }}>
           Buy, Sell or Invest in{' '}
           <span style={{
@@ -662,7 +662,7 @@ export default function LandingPage({ sessionId }) {
           Talk to our AI advisor — get guidance on buying, selling, investing or valuing a business.
         </p>
 
-        <div style={{ width: '100%', maxWidth: '700px' }}>
+        <div style={{ width: '100%', maxWidth: '620px' }}>
           {!isChatting && (
             <>
               <div style={{
