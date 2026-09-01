@@ -19,6 +19,7 @@ export async function callAiSearch({
   userContext = '',
   sessionId,
   userId = null,
+  projectId = null,
   conversationPhase = 'discovery',
   exchangeCount = 0,
   // Cumulative state already held client-side, echoed back so the server
@@ -41,6 +42,7 @@ export async function callAiSearch({
       userContext,
       sessionId,
       userId,
+      projectId,
       conversationPhase,
       exchangeCount,
       priorExtraction,
