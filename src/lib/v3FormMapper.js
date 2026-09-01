@@ -46,6 +46,10 @@ export function buildV3FormFromModel(extraction, computed, profile) {
     if (sRaw.includes(key)) sector = SECTOR_MAP[key];
   });
   var sectorData = SECTORS.find(function (s) { return s.name === sector; }) || SECTORS[0];
+  // The actual PL_TEMPLATES key this sector renders under (see the forecast
+  // row-shape comment further down) - falls back to 'trading' to match
+  // sector's own default above, in the unreached case sectorData is missing.
+  var sectorTemplate = (sectorData && sectorData.template) || 'trading';
 
   var baseRev = (computed && computed.base.rev) || 0;
   var baseCogs = (computed && computed.base.cogs) || 0;
@@ -75,15 +79,29 @@ export function buildV3FormFromModel(extraction, computed, profile) {
     var cogsYr = Math.round(baseCogs * revGrowth);
     var inflFactor = Math.pow(1.08, i);
 
+    // Branch on the sector's actual PL_TEMPLATES key (sectorData.template,
+    // from ValuationPlatform.jsx's SECTORS list), not on the sector NAME.
+    // Those are two different vocabularies - e.g. 'IT Services / BPO' and
+    // 'Healthcare Services' both resolve to the "services" template,
+    // 'Technology / SaaS' resolves to "saas", 'Engineering / Construction'
+    // resolves to "manufacturing" alongside the sector literally named
+    // 'Manufacturing'. Branching on sector name here previously produced a
+    // row shaped for a DIFFERENT template than the one S3_Forecast actually
+    // renders (PL_TEMPLATES[sectorData.template] in ValuationPlatform.jsx) -
+    // e.g. 'Technology / SaaS' got services-shaped keys (emp_cost/delivery/
+    // software) while the saas template reads hosting/emp_tech/licenses, so
+    // every P&L cell came back blank even though the AI interview had real
+    // numbers. Keying off the template name is what keeps this aligned no
+    // matter which sector maps to which template in the future.
     var row = {};
-    if (sector === 'Trading / Distribution') {
+    if (sectorTemplate === 'trading') {
       row = {
         revenue: revYr * RAW, purchases: cogsYr * RAW, inv_adj: 0,
-        selling_dist: Math.round((marketing + salaries * 0.3) * inflFactor) * RAW,
+        selling_exp: Math.round((marketing + salaries * 0.3) * inflFactor) * RAW,
         gen_admin: Math.round((salaries * 0.7 + rent + technology + badDebt + misc) * inflFactor) * RAW,
         da: Math.round(baseDep) * RAW, interest: Math.round(baseInterest) * RAW,
       };
-    } else if (sector === 'Manufacturing') {
+    } else if (sectorTemplate === 'manufacturing') {
       row = {
         revenue: revYr * RAW, raw_mat: cogsYr * RAW,
         direct_labour: Math.round(salaries * 0.6 * inflFactor) * RAW,
@@ -92,7 +110,7 @@ export function buildV3FormFromModel(extraction, computed, profile) {
         gen_admin: Math.round((rent + misc + badDebt) * inflFactor) * RAW,
         da: Math.round(baseDep) * RAW, interest: Math.round(baseInterest) * RAW,
       };
-    } else if (sector === 'IT Services / BPO') {
+    } else if (sectorTemplate === 'saas') {
       row = {
         revenue: revYr * RAW,
         emp_tech: Math.round((salaries * 0.7 + baseCogs * 0.5) * inflFactor) * RAW,
@@ -103,7 +121,9 @@ export function buildV3FormFromModel(extraction, computed, profile) {
         da: Math.round(baseDep) * RAW, interest: Math.round(baseInterest) * RAW,
       };
     } else {
-      // Services / default template
+      // "services" - the PL_TEMPLATES default (IT Services/BPO, Healthcare
+      // Services, Professional Services, and anything else not covered
+      // above).
       row = {
         revenue: revYr * RAW,
         emp_cost: Math.round(salaries * inflFactor) * RAW,
