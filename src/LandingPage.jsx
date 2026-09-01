@@ -336,27 +336,16 @@ export default function LandingPage({ sessionId }) {
           )}
 
           {isChatting && (
-            <div
-              onFocus={reclaimChatFocus}
-              style={{
-                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: '18px', display: 'flex', flexDirection: 'column',
-                height: 'min(560px, 72vh)', overflow: 'hidden',
-              }}
-            >
-              {/* Card header - persona pill stays visible even when scrolled */}
+            // No card, no border, no boxShadow - the conversation flows
+            // directly in the hero's own background, like the page itself
+            // is talking with you, not a widget dropped onto the page.
+            <div onFocus={reclaimChatFocus} style={{ display: 'flex', flexDirection: 'column', height: 'min(560px, 72vh)' }}>
               <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.1)', flexShrink: 0,
+                paddingBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.1)', flexShrink: 0,
               }}>
-                <span style={{
-                  display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: '600', color: '#fff',
-                }}>
-                  <span style={{
-                    width: '22px', height: '22px', borderRadius: '50%', background: 'rgba(37,99,235,0.35)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: '700', color: '#93c5fd',
-                  }}>AI</span>
-                  Business Advisor
+                <span style={{ fontSize: '11px', fontWeight: '600', letterSpacing: '0.04em', textTransform: 'uppercase', color: '#60a5fa' }}>
+                  AI Business Advisor
                 </span>
                 <button onClick={resetConversation} title="Clear conversation and start over" style={{
                   fontSize: '11px', color: 'rgba(255,255,255,0.5)', background: 'transparent',
@@ -364,30 +353,33 @@ export default function LandingPage({ sessionId }) {
                 }}>Clear conversation and start over</button>
               </div>
 
-              {/* Transcript - grows, scrolls; input stays pinned below */}
-              <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+              {/* Transcript - grows, scrolls; input stays pinned below. The
+                  advisor's own replies carry no bubble at all, only your
+                  own messages get a light tint, so the AI's voice reads as
+                  the page's own narration rather than a chatbot talking
+                  back from inside a box. */}
+              <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 2px' }}>
                 {messages.map(function (m, i) {
                   var isUser = m.role === 'user';
+                  if (isUser) {
+                    return (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '14px' }}>
+                        <div style={{
+                          maxWidth: '82%', padding: '9px 13px', borderRadius: '10px 10px 2px 10px',
+                          fontSize: '13px', lineHeight: '1.55', whiteSpace: 'pre-wrap',
+                          background: 'rgba(37,99,235,0.22)', color: '#bfdbfe', fontWeight: '500',
+                        }}>{m.text}</div>
+                      </div>
+                    );
+                  }
                   return (
-                    <div key={i} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: '10px', gap: '8px' }}>
-                      {!isUser && (
-                        <span style={{
-                          width: '22px', height: '22px', borderRadius: '50%', background: 'rgba(37,99,235,0.35)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: '700',
-                          color: '#93c5fd', flexShrink: 0, marginTop: '2px',
-                        }}>AI</span>
-                      )}
-                      <div style={{
-                        maxWidth: '82%', padding: '10px 14px', borderRadius: isUser ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
-                        fontSize: '13px', lineHeight: '1.55', whiteSpace: 'pre-wrap',
-                        background: isUser ? '#2563eb' : 'rgba(255,255,255,0.1)',
-                        color: '#fff',
-                      }}>{m.text}</div>
-                    </div>
+                    <div key={i} style={{
+                      marginBottom: '16px', fontSize: '13px', lineHeight: '1.65', whiteSpace: 'pre-wrap', color: 'rgba(255,255,255,0.9)',
+                    }}>{m.text}</div>
                   );
                 })}
                 {loading && (
-                  <div style={{ display: 'flex', gap: '4px', padding: '4px 14px' }}>
+                  <div style={{ display: 'flex', gap: '4px', padding: '4px 2px' }}>
                     {[0, 1, 2].map(function (i) {
                       return <span key={i} style={{
                         width: '5px', height: '5px', borderRadius: '50%', background: 'rgba(255,255,255,0.6)',
@@ -422,12 +414,13 @@ export default function LandingPage({ sessionId }) {
                 )}
               </div>
 
-              {/* Follow-up input, pinned at the bottom of the same card */}
+              {/* Follow-up input - a plain bar with just a divider above it,
+                  not a separate floating pill card. */}
               {!atLimit && (
-                <div style={{ padding: '10px 12px 12px', borderTop: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
+                <div style={{ paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
                   <div style={{
-                    display: 'flex', alignItems: 'flex-end', gap: '8px', background: 'rgba(255,255,255,0.08)',
-                    border: '1px solid rgba(255,255,255,0.15)', borderRadius: '18px', padding: '5px 5px 5px 14px',
+                    display: 'flex', alignItems: 'flex-end', gap: '8px', background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px', padding: '5px 5px 5px 14px',
                   }}>
                     <textarea
                       ref={heroInputRef}
@@ -449,8 +442,8 @@ export default function LandingPage({ sessionId }) {
                       onClick={function () { sendMessage(); }}
                       disabled={loading || !input.trim()}
                       style={{
-                        width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0, border: 'none', marginBottom: '2px',
-                        background: loading || !input.trim() ? 'rgba(255,255,255,0.15)' : '#2563eb', color: '#fff',
+                        width: '30px', height: '30px', borderRadius: '7px', flexShrink: 0, border: 'none', marginBottom: '2px',
+                        background: loading || !input.trim() ? 'rgba(255,255,255,0.12)' : '#2563eb', color: '#fff',
                         cursor: loading || !input.trim() ? 'default' : 'pointer',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px',
                       }}
