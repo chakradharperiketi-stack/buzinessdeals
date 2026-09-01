@@ -221,7 +221,7 @@ export default function LandingPage({ sessionId }) {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--surface-0)' }}>
-      <style>{'html { scroll-behavior: smooth; }'}</style>
+      <style>{'html { scroll-behavior: smooth; } .bd-hero-input::placeholder { color: rgba(255,255,255,0.45); opacity: 1; }'}</style>
       {authModal && <AuthModal mode={authModal} onClose={function () { setAuthModal(null); }} />}
 
       {/* ===== 1. NAVIGATION ===== */}
@@ -269,14 +269,22 @@ export default function LandingPage({ sessionId }) {
       }}>
         {/* Headline stays visible whether or not a conversation is running -
             the advisor answers underneath it, it doesn't replace it. */}
-        <p style={{ fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#60a5fa', margin: '0 0 12px', fontWeight: '600' }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: '7px', fontSize: '12px', letterSpacing: '0.02em',
+          color: '#93c5fd', fontWeight: '600', margin: '0 0 16px', padding: '7px 18px', borderRadius: '999px',
+          background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.35)',
+        }}>
           <span aria-hidden="true">✦</span> India's first AI-powered business marketplace
-        </p>
+        </span>
         <h1 style={{
           fontSize: 'clamp(26px, 4vw, 40px)', fontWeight: '700', color: '#fff', textAlign: 'center',
           margin: '0 0 12px', maxWidth: '720px', lineHeight: '1.25',
         }}>
-          Buy, Sell or Invest in Indian Businesses
+          Buy, Sell or Invest in{' '}
+          <span style={{
+            background: 'linear-gradient(90deg, #93c5fd, #c4b5fd)',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+          }}>Indian Businesses</span>
         </h1>
         <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.6)', textAlign: 'center', margin: '0 0 32px', maxWidth: '560px' }}>
           Talk to our AI advisor — get guidance on buying, selling, investing or valuing a business.
@@ -286,12 +294,13 @@ export default function LandingPage({ sessionId }) {
           {!isChatting && (
             <>
               <div style={{
-                background: '#ffffff', borderRadius: '20px', padding: '10px 10px 10px 20px',
-                display: 'flex', alignItems: 'flex-end', gap: '10px', boxShadow: '0 12px 32px rgba(0,0,0,0.35)',
-                border: '1px solid rgba(255,255,255,0.6)',
+                background: 'rgba(255,255,255,0.07)', borderRadius: '18px', padding: '10px 10px 10px 20px',
+                display: 'flex', alignItems: 'flex-end', gap: '10px', boxShadow: '0 12px 32px rgba(0,0,0,0.3)',
+                border: '1px solid rgba(255,255,255,0.18)',
               }}>
-                <span aria-hidden="true" style={{ fontSize: '15px', color: '#4f46e5', marginBottom: '12px' }}>✦</span>
+                <span aria-hidden="true" style={{ fontSize: '15px', color: '#818cf8', marginBottom: '12px' }}>✦</span>
                 <textarea
+                  className="bd-hero-input"
                   ref={heroInputRef}
                   rows={1}
                   value={input}
@@ -303,7 +312,8 @@ export default function LandingPage({ sessionId }) {
                   }}
                   placeholder={atLimit ? 'Create an account to continue...' : 'Ask me anything — sell my business, invest 2 crore, FEMA valuation...'}
                   style={{
-                    flex: 1, border: 'none', outline: 'none', fontSize: '14px', padding: '9px 0',
+                    flex: 1, border: 'none', outline: 'none', background: 'transparent', color: '#fff',
+                    fontSize: '14px', padding: '9px 0',
                     resize: 'none', overflowY: 'auto', maxHeight: '120px', lineHeight: '1.5', fontFamily: 'inherit',
                   }}
                 />
@@ -312,7 +322,8 @@ export default function LandingPage({ sessionId }) {
                   disabled={atLimit || loading || !input.trim()}
                   style={{
                     flexShrink: 0, border: 'none', borderRadius: '14px', padding: '11px 18px',
-                    background: atLimit || loading || !input.trim() ? '#c4cdd9' : '#2563eb', color: '#fff',
+                    background: atLimit || loading || !input.trim() ? 'rgba(255,255,255,0.12)' : '#2563eb',
+                    color: atLimit || loading || !input.trim() ? 'rgba(255,255,255,0.4)' : '#fff',
                     cursor: atLimit || loading || !input.trim() ? 'default' : 'pointer',
                     display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '600',
                   }}
@@ -430,6 +441,7 @@ export default function LandingPage({ sessionId }) {
                 }}>
                   <span aria-hidden="true" style={{ fontSize: '14px', color: '#818cf8', marginBottom: '11px' }}>✦</span>
                   <textarea
+                    className="bd-hero-input"
                     ref={heroInputRef}
                     rows={1}
                     value={input}
