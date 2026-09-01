@@ -347,33 +347,36 @@ export default function ConversationEngine({
 
   return (
     <div style={{
-      width: '35%', flexShrink: 0, minWidth: '300px', height: '100%', display: 'flex', flexDirection: 'column',
-      background: 'var(--surface-1)', borderLeft: '1px solid var(--border)',
+      width: '28%', flexShrink: 0, minWidth: '280px', height: '100%', display: 'flex', flexDirection: 'column',
+      background: 'linear-gradient(180deg, #0f172a, #1e293b)', borderLeft: '1px solid rgba(255,255,255,0.08)',
     }}>
-      {/* Header - a workspace panel header, not a chat-app title bar: same
-          weight/tokens as any other panel heading in the app. */}
-      <div style={{ padding: '16px 18px 14px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+      {/* Header - dark, matching the AI advisor's look on the public landing
+          page (LandingPage.jsx hero), so the same "talking to an AI copilot"
+          identity carries from the marketing site into the authenticated
+          workspace. The dashboard on the right stays light - this is the
+          deliberate dark/light split, not an all-dark theme. */}
+      <div style={{ padding: '16px 18px 14px', borderBottom: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: convPhase === 'discovery' ? '10px' : 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ width: '30px', height: '30px', borderRadius: '8px', background: 'var(--bg-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <i className={'ti ' + persona.icon} aria-hidden="true" style={{ fontSize: '15px', color: 'var(--text-accent)' }} />
+            <div style={{ width: '30px', height: '30px', borderRadius: '9px', background: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <i className={'ti ' + persona.icon} aria-hidden="true" style={{ fontSize: '15px', color: '#fff' }} />
             </div>
             <div>
-              <p style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', margin: 0 }}>{persona.label}</p>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0 }}>Working alongside you on this business</p>
+              <p style={{ fontSize: '13px', fontWeight: '600', color: '#fff', margin: 0 }}>{persona.label}</p>
+              <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', margin: 0 }}>Working alongside you on this business</p>
             </div>
           </div>
           <div style={{ display: 'flex', gap: '6px' }}>
             {convPhase !== 'discovery' && (
               <button onClick={function () { onGoHome && onGoHome(); }} title="Back to Home" style={{
-                display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--text-muted)', background: 'transparent',
-                border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'rgba(255,255,255,0.6)', background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.18)', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer',
               }}><i className="ti ti-home" aria-hidden="true" style={{ fontSize: '11px' }} />Home</button>
             )}
             {messages.length > 1 && (
               <button onClick={handleClear} title="Clear conversation and start over" style={{
-                fontSize: '11px', color: 'var(--text-muted)', background: 'transparent',
-                border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer',
+                fontSize: '11px', color: 'rgba(255,255,255,0.6)', background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.18)', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer',
               }}>Clear</button>
             )}
           </div>
@@ -383,7 +386,7 @@ export default function ConversationEngine({
             {Array.from({ length: MAX_DISCOVERY_DOTS }).map(function (_, i) {
               return <span key={i} style={{
                 width: '5px', height: '5px', borderRadius: '50%',
-                background: i < exchangeCount ? 'var(--text-accent)' : 'var(--border)',
+                background: i < exchangeCount ? '#818cf8' : 'rgba(255,255,255,0.15)',
               }} />;
             })}
           </div>
@@ -393,13 +396,14 @@ export default function ConversationEngine({
       {/* Conversation - flows as page content, not stacked chat bubbles in
           a boxed widget. The advisor's own text has no bubble at all (it
           reads like the workspace itself is commenting); only your own
-          input gets a light tint, just enough to mark whose turn it was. */}
+          input gets a tinted pill, just enough to mark whose turn it was -
+          same convention as the landing page's chat hero. */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '18px 20px' }}>
         {restoring ? (
           <div style={{ display: 'flex', gap: '4px', padding: '4px 0' }}>
             {[0, 1, 2].map(function (i) {
               return <span key={i} style={{
-                width: '5px', height: '5px', borderRadius: '50%', background: 'var(--text-muted)',
+                width: '5px', height: '5px', borderRadius: '50%', background: 'rgba(255,255,255,0.4)',
                 animation: 'pulse 1.2s infinite', animationDelay: (i * 0.2) + 's',
               }} />;
             })}
@@ -413,7 +417,7 @@ export default function ConversationEngine({
                   <div style={{
                     maxWidth: '85%', padding: '9px 13px', borderRadius: '10px 10px 2px 10px',
                     fontSize: '13px', lineHeight: '1.55', whiteSpace: 'pre-wrap',
-                    background: 'var(--bg-accent)', color: 'var(--text-accent)', fontWeight: '500',
+                    background: '#2563eb', color: '#fff', fontWeight: '500',
                   }}>{m.text}</div>
                 </div>
               );
@@ -421,7 +425,7 @@ export default function ConversationEngine({
             return (
               <div key={i} style={{
                 marginBottom: '18px', fontSize: '13px', lineHeight: '1.65', whiteSpace: 'pre-wrap',
-                color: 'var(--text-primary)', paddingLeft: '2px',
+                color: 'rgba(255,255,255,0.92)', paddingLeft: '2px',
               }}>{cleanAssistantText(m.text)}</div>
             );
           })
@@ -431,7 +435,7 @@ export default function ConversationEngine({
           <div style={{ display: 'flex', gap: '4px', padding: '4px 2px' }}>
             {[0, 1, 2].map(function (i) {
               return <span key={i} style={{
-                width: '5px', height: '5px', borderRadius: '50%', background: 'var(--text-muted)',
+                width: '5px', height: '5px', borderRadius: '50%', background: 'rgba(255,255,255,0.4)',
                 animation: 'pulse 1.2s infinite', animationDelay: (i * 0.2) + 's',
               }} />;
             })}
@@ -441,20 +445,22 @@ export default function ConversationEngine({
         {(lastAction || pendingPhase) && !loading && (
           <div style={{ marginTop: '4px' }}>
             <button onClick={handleTransitionClick} style={{
-              background: 'var(--text-accent)', color: '#fff', border: 'none', borderRadius: '8px',
+              background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px',
               padding: '10px 16px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
             }}>{(lastAction && lastAction.label) || 'Continue →'}</button>
           </div>
         )}
       </div>
 
-      {/* Input - a plain workspace field, not a floating pill widget. */}
-      <div style={{ padding: '12px 18px 16px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+      {/* Input - a plain workspace field, not a floating pill widget - dark
+          to match the panel around it. */}
+      <div style={{ padding: '12px 18px 16px', borderTop: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
         <div style={{
-          display: 'flex', alignItems: 'flex-end', gap: '8px', background: 'var(--surface-0)',
-          border: '1px solid var(--border)', borderRadius: '10px', padding: '6px 6px 6px 12px',
+          display: 'flex', alignItems: 'flex-end', gap: '8px', background: 'rgba(255,255,255,0.05)',
+          border: '1px solid rgba(255,255,255,0.15)', borderRadius: '10px', padding: '6px 6px 6px 12px',
         }}>
           <textarea
+            className="bd-dark-input"
             ref={textareaRef}
             rows={1}
             value={input}
@@ -471,7 +477,7 @@ export default function ConversationEngine({
             }}
             placeholder="Type your message... (Shift+Enter for a new line)"
             style={{
-              flex: 1, border: 'none', outline: 'none', background: 'transparent', color: 'var(--text-primary)',
+              flex: 1, border: 'none', outline: 'none', background: 'transparent', color: '#fff',
               fontSize: '13px', padding: '8px 0', resize: 'none', overflowY: 'auto',
               maxHeight: '132px', lineHeight: '1.5', fontFamily: 'inherit',
             }}
@@ -481,8 +487,8 @@ export default function ConversationEngine({
             disabled={restoring || loading || !input.trim()}
             style={{
               width: '30px', height: '30px', borderRadius: '7px', flexShrink: 0, border: 'none', marginBottom: '3px',
-              background: restoring || loading || !input.trim() ? 'var(--surface-2)' : 'var(--text-accent)',
-              color: restoring || loading || !input.trim() ? 'var(--text-muted)' : '#fff',
+              background: restoring || loading || !input.trim() ? 'rgba(255,255,255,0.1)' : '#2563eb',
+              color: restoring || loading || !input.trim() ? 'rgba(255,255,255,0.35)' : '#fff',
               cursor: restoring || loading || !input.trim() ? 'default' : 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px',
             }}
