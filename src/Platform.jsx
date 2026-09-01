@@ -109,8 +109,28 @@ function relativeTime(iso) {
 
 var STATUS_COLORS = { draft: '#64748b', model_complete: '#16a34a', listed: '#2563eb', archived: '#94a3b8' };
 
-function BusinessRow({ p, isActive, hasDraft, activePct, switchingProject, onOpen, onArchive }) {
+function BusinessRow({ p, isActive, hasDraft, activePct, switchingProject, onOpen, onArchive, onDelete, isEditing, onStartEdit, onRename, onCancelEdit }) {
   var color = STATUS_COLORS[p.status] || STATUS_COLORS.draft;
+  var nameInputSt = useState(p.name), nameInput = nameInputSt[0], setNameInput = nameInputSt[1];
+
+  function commitRename() {
+    var trimmed = nameInput.trim();
+    onRename(trimmed || p.name); // empty input just cancels back to the existing name, never blanks it
+  }
+
+  if (isEditing) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 12px', borderBottom: '1px solid var(--border)', background: 'var(--surface-1)' }}>
+        <input autoFocus value={nameInput} onChange={function (e) { setNameInput(e.target.value); }}
+          onKeyDown={function (e) { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') onCancelEdit(); }}
+          onBlur={commitRename}
+          style={{ flex: 1, fontSize: '13px', padding: '5px 8px', borderRadius: '6px', border: '1px solid var(--border-accent)', background: 'var(--surface-0)', color: 'var(--text-primary)' }}
+        />
+        <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Enter to save</span>
+      </div>
+    );
+  }
+
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
@@ -132,12 +152,25 @@ function BusinessRow({ p, isActive, hasDraft, activePct, switchingProject, onOpe
       </button>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
         <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{relativeTime(p.updated_at)}</span>
+        <button title="Rename" onClick={function (e) { e.stopPropagation(); setNameInput(p.name); onStartEdit(); }} disabled={switchingProject} style={{
+          background: 'transparent', border: 'none', cursor: switchingProject ? 'default' : 'pointer', color: 'var(--text-muted)', padding: '2px', display: 'flex',
+        }}>
+          <i className="ti ti-pencil" aria-hidden="true" style={{ fontSize: '14px' }} />
+        </button>
         {onArchive && (
           <button title="Archive" onClick={onArchive} disabled={switchingProject} style={{
             background: 'transparent', border: 'none', cursor: switchingProject ? 'default' : 'pointer',
             color: 'var(--text-muted)', padding: '2px', display: 'flex',
           }}>
             <i className="ti ti-archive" aria-hidden="true" style={{ fontSize: '14px' }} />
+          </button>
+        )}
+        {onDelete && (
+          <button title="Delete permanently" onClick={onDelete} disabled={switchingProject} style={{
+            background: 'transparent', border: 'none', cursor: switchingProject ? 'default' : 'pointer',
+            color: '#dc2626', padding: '2px', display: 'flex',
+          }}>
+            <i className="ti ti-trash" aria-hidden="true" style={{ fontSize: '14px' }} />
           </button>
         )}
         <button disabled={switchingProject} onClick={onOpen} style={{ background: 'transparent', border: 'none', cursor: switchingProject ? 'default' : 'pointer', padding: '2px', display: 'flex' }}>
@@ -148,10 +181,22 @@ function BusinessRow({ p, isActive, hasDraft, activePct, switchingProject, onOpe
   );
 }
 
-function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel, projectId, projectsList, onSwitchProject, onNewProject, onArchiveProject, onUnarchiveProject, switchingProject }) {
+function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel, projectId, projectsList, onSwitchProject, onNewProject, onArchiveProject, onUnarchiveProject, onRenameProject, onDeleteProject, autoEditProjectId, onAutoEditConsumed, switchingProject }) {
   var hour = new Date().getHours();
   var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   var showArchivedSt = useState(false), showArchived = showArchivedSt[0], setShowArchived = showArchivedSt[1];
+  var editingIdSt = useState(null), editingId = editingIdSt[0], setEditingId = editingIdSt[1];
+  // A newly-created business needs to actually be earmarked, not left as
+  // "Untitled Business" indefinitely - this opens the rename field on it
+  // automatically right after creation (skippable - clicking away just
+  // keeps the default name, this isn't a hard-blocking prompt).
+  useEffect(function () {
+    if (autoEditProjectId) {
+      setEditingId(autoEditProjectId);
+      onAutoEditConsumed && onAutoEditConsumed();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoEditProjectId]);
   // Resume affordance - without this, a returning user with a saved
   // interview/model/report in progress has no way to know it, and lands on
   // the same blank 3-card picker as a brand-new visitor every time.
@@ -218,7 +263,12 @@ function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel, pro
               return (
                 <BusinessRow key={p.id} p={p} isActive={isActive} hasDraft={hasDraft} activePct={activePct} switchingProject={switchingProject}
                   onOpen={function () { isActive ? onCard('analyst') : onSwitchProject(p.id); }}
-                  onArchive={isActive ? null : function (e) { e.stopPropagation(); onArchiveProject(p.id); }} />
+                  onArchive={isActive ? null : function (e) { e.stopPropagation(); onArchiveProject(p.id); }}
+                  onDelete={null}
+                  isEditing={editingId === p.id}
+                  onStartEdit={function () { setEditingId(p.id); }}
+                  onCancelEdit={function () { setEditingId(null); }}
+                  onRename={function (newName) { setEditingId(null); onRenameProject(p.id, newName); }} />
               );
             })}
           </div>
@@ -233,7 +283,12 @@ function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel, pro
                     return (
                       <BusinessRow key={p.id} p={p} isActive={false} hasDraft={false} activePct={0} switchingProject={switchingProject}
                         onOpen={function () { onUnarchiveProject(p.id); }}
-                        onArchive={null} />
+                        onArchive={null}
+                        onDelete={function (e) { e.stopPropagation(); onDeleteProject(p.id, p.name); }}
+                        isEditing={editingId === p.id}
+                        onStartEdit={function () { setEditingId(p.id); }}
+                        onCancelEdit={function () { setEditingId(null); }}
+                        onRename={function (newName) { setEditingId(null); onRenameProject(p.id, newName); }} />
                     );
                   })}
                 </div>
@@ -261,10 +316,10 @@ function ComingNextPanel({ title, note }) {
   );
 }
 
-function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, cardLoading, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange, projectsList, onSwitchProject, onNewProject, onArchiveProject, onUnarchiveProject, switchingProject }) {
+function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, cardLoading, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange, projectsList, onSwitchProject, onNewProject, onArchiveProject, onUnarchiveProject, onRenameProject, onDeleteProject, autoEditProjectId, onAutoEditConsumed, switchingProject }) {
   return (
     <div style={{ width: '65%', flex: 1, height: '100%', overflowY: 'auto', background: 'var(--surface-0)' }}>
-      {convPhase === 'discovery' && <HomeScreen onCard={onCard} loadingKey={cardLoading} report={report} convExtraction={convExtraction} convModel={convModel} projectId={projectId} projectsList={projectsList} onSwitchProject={onSwitchProject} onNewProject={onNewProject} onArchiveProject={onArchiveProject} onUnarchiveProject={onUnarchiveProject} switchingProject={switchingProject} />}
+      {convPhase === 'discovery' && <HomeScreen onCard={onCard} loadingKey={cardLoading} report={report} convExtraction={convExtraction} convModel={convModel} projectId={projectId} projectsList={projectsList} onSwitchProject={onSwitchProject} onNewProject={onNewProject} onArchiveProject={onArchiveProject} onUnarchiveProject={onUnarchiveProject} onRenameProject={onRenameProject} onDeleteProject={onDeleteProject} autoEditProjectId={autoEditProjectId} onAutoEditConsumed={onAutoEditConsumed} switchingProject={switchingProject} />}
 
       {convPhase === 'valuation' && (
         <ValuationPlatform
@@ -407,6 +462,10 @@ export default function Platform({ user, sessionId, onSignOut }) {
   // Empty for an anonymous user, same as projectId.
   var projectsListSt = useState([]), projectsList = projectsListSt[0], setProjectsList = projectsListSt[1];
   var switchingProjectSt = useState(false), switchingProject = switchingProjectSt[0], setSwitchingProject = switchingProjectSt[1];
+  // One-shot signal: set right after createNewProject succeeds, consumed by
+  // HomeScreen to auto-open that project's rename field, then cleared back
+  // to null via onAutoEditConsumed - see HomeScreen's effect.
+  var autoEditProjectIdSt = useState(null), autoEditProjectId = autoEditProjectIdSt[0], setAutoEditProjectId = autoEditProjectIdSt[1];
 
   function refreshProjectsList() {
     if (!user || !user.id) return Promise.resolve([]);
@@ -498,9 +557,35 @@ export default function Platform({ user, sessionId, onSignOut }) {
         setReport(null);
         setConvPhase('discovery');
         setSwitchingProject(false);
+        setAutoEditProjectId(res.data.id);
         refreshProjectsList();
       })
       .catch(function () { setSwitchingProject(false); });
+  }
+
+  // Answers "how do I tell which is which" directly: available on every
+  // project at any time (not just at creation), so a bad or duplicate
+  // auto-derived name (e.g. two different businesses that both extracted
+  // to the same generic businessType) can always be fixed by hand.
+  function renameProject(pid, name) {
+    if (!pid || !name) return;
+    supabase.from('projects').update({ name: name }).eq('id', pid)
+      .then(function () { refreshProjectsList(); }).catch(function () {});
+  }
+
+  // Only reachable from the archived list (see HomeScreen) - deliberately
+  // not available on a live project, so a delete always passes through
+  // archive first. Permanent and irreversible: cascades to that project's
+  // ai_conversations/financial_model_reports rows via the FK in
+  // add_projects.sql. Confirmed explicitly before it fires.
+  function deleteProjectPermanently(pid, name) {
+    if (!pid) return;
+    var ok = typeof window !== 'undefined' && window.confirm(
+      'Permanently delete "' + (name || 'this business') + '"? This removes its entire interview history and any generated report. This cannot be undone.'
+    );
+    if (!ok) return;
+    supabase.from('projects').delete().eq('id', pid)
+      .then(function () { refreshProjectsList(); }).catch(function () {});
   }
 
   // Best-effort project.updated_at bump so "most recently touched" sorting
@@ -853,6 +938,10 @@ export default function Platform({ user, sessionId, onSignOut }) {
           onNewProject={createNewProject}
           onArchiveProject={archiveProject}
           onUnarchiveProject={unarchiveProject}
+          onRenameProject={renameProject}
+          onDeleteProject={deleteProjectPermanently}
+          autoEditProjectId={autoEditProjectId}
+          onAutoEditConsumed={function () { setAutoEditProjectId(null); }}
           switchingProject={switchingProject}
         />
       </div>
