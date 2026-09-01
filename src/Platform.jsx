@@ -807,7 +807,15 @@ export default function Platform({ user, sessionId, onSignOut }) {
   // completed analyst model if one exists, else null - buildV3FormFromModel
   // handles either) so this can't regress again via a fourth entry point.
   function handlePhaseChange(nextPhase) {
-    if (nextPhase === 'valuation' && !sellerForm) {
+    // Checking sellerForm.engagementType, not just sellerForm's truthiness,
+    // is deliberate: a sellerForm object can be truthy but still lack
+    // engagementType (see the comment on ValuationPlatform's onFormChange
+    // effect - that was, until just now, how a visit to the picker screen
+    // silently poisoned this exact state, permanently, even in localStorage).
+    // Treating that shape the same as "no sellerForm yet" makes this guard
+    // self-healing against any such object already sitting in memory or
+    // localStorage from before that source fix existed.
+    if (nextPhase === 'valuation' && !(sellerForm && sellerForm.engagementType)) {
       setCardLoading('valuation');
       loadSellerFormForProfile(convModel, convModel ? computeModel(convModel) : null, function (form) {
         setSellerForm(form);
