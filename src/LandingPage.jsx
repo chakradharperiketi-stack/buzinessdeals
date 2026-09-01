@@ -641,7 +641,7 @@ export default function LandingPage({ sessionId }) {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--surface-0)' }}>
-      <style>{'html { scroll-behavior: smooth; } .bd-hero-input::placeholder { color: rgba(255,255,255,0.45); opacity: 1; }'}</style>
+      <style>{'html { scroll-behavior: smooth; }'}</style>
       {authModal && <AuthModal mode={authModal} onClose={function () { setAuthModal(null); }} />}
 
       {/* ===== 1. NAVIGATION ===== */}
@@ -686,7 +686,7 @@ export default function LandingPage({ sessionId }) {
               }}>
                 <i className="ti ti-sparkles" aria-hidden="true" style={{ fontSize: '15px', color: '#818cf8', marginBottom: '12px' }} />
                 <textarea
-                  className="bd-hero-input"
+                  className="bd-dark-input"
                   ref={heroInputRef}
                   rows={1}
                   value={input}
@@ -822,7 +822,7 @@ export default function LandingPage({ sessionId }) {
                 }}>
                   <i className="ti ti-sparkles" aria-hidden="true" style={{ fontSize: '14px', color: '#818cf8', marginBottom: '11px' }} />
                   <textarea
-                    className="bd-hero-input"
+                    className="bd-dark-input"
                     ref={heroInputRef}
                     rows={1}
                     value={input}
