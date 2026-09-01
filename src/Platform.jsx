@@ -137,7 +137,7 @@ function ComingNextPanel({ title, note }) {
   );
 }
 
-function RightPanel({ convPhase, user, sessionId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, cardLoading, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange }) {
+function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, cardLoading, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange }) {
   return (
     <div style={{ width: '65%', flex: 1, height: '100%', overflowY: 'auto', background: 'var(--surface-0)' }}>
       {convPhase === 'discovery' && <HomeScreen onCard={onCard} loadingKey={cardLoading} />}
@@ -159,6 +159,7 @@ function RightPanel({ convPhase, user, sessionId, sellerForm, selEngId, convExtr
           onProceed={onProceedToValuation}
           sessionId={sessionId}
           userId={user ? user.id : null}
+          projectId={projectId}
           report={report}
           onReportGenerated={onReportGenerated}
         />
@@ -229,6 +230,66 @@ export default function Platform({ user, sessionId, onSignOut }) {
   // survives a remount instead of forcing regeneration (a real API call,
   // not free) every time the user tabs away and back.
   var reportSt = useState(persisted.report || null), report = reportSt[0], setReport = reportSt[1];
+  // Account-anchored persistence (see supabase/migrations/add_projects.sql
+  // and link_conversation_state.sql). Before this, convExtraction/convModel/
+  // brief/report only ever lived in this browser's localStorage, keyed by
+  // an anonymous per-browser sessionId with no link back to the account -
+  // "log out, log back in (or a different browser/device), report is gone"
+  // even though it was sitting untouched in financial_model_reports the
+  // whole time, because nothing ever queried it back by user_id. For a
+  // logged-in user, projectId becomes the real source of truth: fetched (or
+  // created) once below, then used to pull the latest saved extraction/
+  // model/brief/report from Supabase, which overwrites whatever the
+  // synchronous localStorage seed above painted first. localStorage is kept
+  // as-is purely for instant paint on remount and for the anonymous
+  // (logged-out) flow, which is unaffected by any of this.
+  var projectIdSt = useState(null), projectId = projectIdSt[0], setProjectId = projectIdSt[1];
+
+  useEffect(function () {
+    var cancelled = false;
+    if (!user || !user.id) return undefined; // anonymous - untouched, localStorage-only as before
+
+    supabase.from('projects').select('*').eq('user_id', user.id).order('updated_at', { ascending: false }).limit(1).maybeSingle()
+      .then(function (res) {
+        if (cancelled) return null;
+        if (res.data) return res.data;
+        // First time this account has ever reached the platform - give them
+        // a project to attach state to from the very first turn, rather
+        // than creating one lazily mid-interview and risking an early turn
+        // going unsaved.
+        return supabase.from('projects').insert({ user_id: user.id, name: 'Untitled Business' }).select().single().then(function (r) { return r.data; });
+      })
+      .then(function (project) {
+        if (cancelled || !project) return;
+        setProjectId(project.id);
+        return Promise.all([
+          supabase.from('ai_conversations').select('extraction, model, brief').eq('project_id', project.id).order('updated_at', { ascending: false }).limit(1).maybeSingle(),
+          supabase.from('financial_model_reports').select('*').eq('project_id', project.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+        ]).then(function (results) {
+          if (cancelled) return;
+          var convRow = results[0] && results[0].data;
+          var reportRow = results[1] && results[1].data;
+          // Supabase is authoritative once it resolves - overwrite whatever
+          // the localStorage seed painted, don't merge (a stale local copy
+          // should never win over the account's real saved state).
+          if (convRow) {
+            if (convRow.extraction) setConvExtraction(convRow.extraction);
+            if (convRow.model) setConvModel(convRow.model);
+            if (convRow.brief) setBrief(convRow.brief);
+          }
+          if (reportRow) setReport(reportRow);
+        });
+      })
+      .catch(function () {
+        // Best-effort - if this fails (offline, RLS misconfigured, etc.)
+        // the user still has whatever localStorage seeded, same as before
+        // this change existed. Never block the app on this.
+      });
+
+    return function () { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user && user.id]);
+
   // Listing-click -> chat context handoff (bidirectional discovery link).
   var injectSt = useState(null), injectMessage = injectSt[0], setInjectMessage = injectSt[1];
   // Which HomeScreen card (if any) is mid-async-load (see handleCard's
@@ -391,6 +452,17 @@ export default function Platform({ user, sessionId, onSignOut }) {
     // that means back at Home, not sitting in an emptied-out version of
     // whichever section they were already in.
     setConvPhase('discovery');
+    // For a logged-in user, the old data isn't actually gone (it's the prior
+    // project, still safely in Supabase) - clearing the CURRENT project's
+    // data in place would destroy it. Instead, start a fresh project and
+    // switch to it, same distinction "New Business" will make explicit once
+    // there's a switcher UI (Phase 2) to move between them. Anonymous users
+    // have no project concept - unaffected, same as before.
+    if (user && user.id) {
+      supabase.from('projects').insert({ user_id: user.id, name: 'Untitled Business' }).select().single()
+        .then(function (res) { if (res.data) setProjectId(res.data.id); })
+        .catch(function () { /* best-effort - worst case this session keeps the old projectId */ });
+    }
   }
 
   return (
@@ -428,6 +500,7 @@ export default function Platform({ user, sessionId, onSignOut }) {
         <ConversationEngine
           user={user}
           sessionId={sessionId}
+          projectId={projectId}
           brief={brief}
           extraction={convExtraction}
           model={convModel}
@@ -446,6 +519,7 @@ export default function Platform({ user, sessionId, onSignOut }) {
           convPhase={convPhase}
           user={user}
           sessionId={sessionId}
+          projectId={projectId}
           sellerForm={sellerForm}
           selEngId={selEngId}
           convExtraction={convExtraction}
