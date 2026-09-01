@@ -339,6 +339,33 @@ export default function Platform({ user, sessionId, onSignOut }) {
     setBrief(briefData);
   }
 
+  // Any set_next_phase-driven transition into 'valuation' - clicking a chat
+  // action button mid-conversation, from ANY persona (discovery, analyst,
+  // wherever) - used to just flip convPhase directly via setConvPhase, same
+  // as every other phase change. That's fine for every destination except
+  // valuation: ValuationPlatform needs a profile-based initialForm or it
+  // falls back to the legacy "who is performing this valuation" engagement-
+  // type picker (see loadSellerFormForProfile's comment above). Only
+  // handleCard('valuation') and handleModelComplete were ever taught to do
+  // that pre-fetch - a mid-chat button into valuation skipped it entirely,
+  // landing on the discarded picker screen even after a full conversation
+  // of gathered numbers. Route every transition into 'valuation' through
+  // the same pre-fetch, using whatever model this session already has (a
+  // completed analyst model if one exists, else null - buildV3FormFromModel
+  // handles either) so this can't regress again via a fourth entry point.
+  function handlePhaseChange(nextPhase) {
+    if (nextPhase === 'valuation' && !sellerForm) {
+      setCardLoading('valuation');
+      loadSellerFormForProfile(convModel, convModel ? computeModel(convModel) : null, function (form) {
+        setSellerForm(form);
+        setConvPhase(nextPhase);
+        setCardLoading(null);
+      });
+      return;
+    }
+    setConvPhase(nextPhase);
+  }
+
   function handleAction(actionType) {
     // Direct-navigation actions (distinct from convPhase, which is already
     // driven by onPhaseChange) will route into SellerDashboard / specific
@@ -406,7 +433,7 @@ export default function Platform({ user, sessionId, onSignOut }) {
           model={convModel}
           convPhase={convPhase}
           exchangeCount={0}
-          onPhaseChange={setConvPhase}
+          onPhaseChange={handlePhaseChange}
           onExtraction={handleExtraction}
           onModelComplete={handleModelComplete}
           onBriefComplete={handleBriefComplete}
