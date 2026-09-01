@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import LandingPage from './LandingPage';
+import LoginPage from './LoginPage';
 import Platform from './Platform';
 import ErrorBoundary from './ErrorBoundary';
 
@@ -26,6 +27,31 @@ export default function App() {
   var loadingSt = useState(true);
   var loading = loadingSt[0], setLoading = loadingSt[1];
   var sessionId = getSessionId();
+
+  // No router in this app - just enough path awareness to serve /login as a
+  // standalone page (for direct links) alongside the modal-based sign-in
+  // flow already on the landing page. Both call the same supabase.auth
+  // methods, so the SIGNED_IN listener below works no matter which one the
+  // user came through.
+  var pathSt = useState(function () {
+    try { return window.location.pathname; } catch (err) { return '/'; }
+  });
+  var path = pathSt[0], setPath = pathSt[1];
+
+  useEffect(function () {
+    function onPopState() {
+      setPath(window.location.pathname);
+    }
+    window.addEventListener('popstate', onPopState);
+    return function () { window.removeEventListener('popstate', onPopState); };
+  }, []);
+
+  function navigateTo(nextPath) {
+    try {
+      window.history.pushState({}, '', nextPath);
+    } catch (err) { /* ignore */ }
+    setPath(nextPath);
+  }
 
   useEffect(function () {
     var timeout = setTimeout(function () {
@@ -98,6 +124,10 @@ export default function App() {
         <Platform user={session.user} sessionId={sessionId} onSignOut={handleSignOut} />
       </ErrorBoundary>
     );
+  }
+
+  if (path === '/login') {
+    return <LoginPage onNavigateHome={function () { navigateTo('/'); }} />;
   }
 
   return <LandingPage sessionId={sessionId} session={null} />;
