@@ -107,69 +107,73 @@ function relativeTime(iso) {
   return Math.round(hrs / 24) + 'd ago';
 }
 
-function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel, projectId, projectsList, onSwitchProject, onNewProject, switchingProject }) {
+var STATUS_COLORS = { draft: '#64748b', model_complete: '#16a34a', listed: '#2563eb', archived: '#94a3b8' };
+
+function BusinessRow({ p, isActive, hasDraft, activePct, switchingProject, onOpen, onArchive }) {
+  var color = STATUS_COLORS[p.status] || STATUS_COLORS.draft;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
+      padding: '9px 12px', borderBottom: '1px solid var(--border)',
+      background: isActive ? 'var(--bg-accent)' : 'transparent',
+    }}>
+      <button disabled={switchingProject} onClick={onOpen} style={{
+        flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '10px', textAlign: 'left',
+        background: 'transparent', border: 'none', cursor: switchingProject ? 'default' : 'pointer', padding: 0,
+      }}>
+        <span style={{
+          fontSize: '10px', fontWeight: '700', padding: '2px 8px', borderRadius: '999px', flexShrink: 0,
+          background: color + '1a', color: color, whiteSpace: 'nowrap',
+        }}>{projectStatusLabel(p.status)}</span>
+        <span style={{
+          fontSize: '13px', fontWeight: isActive ? '600' : '500', color: isActive ? 'var(--text-accent)' : 'var(--text-primary)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>{p.name}{isActive ? ' · Active' : ''}{isActive && hasDraft ? ' (' + activePct + '%)' : ''}</span>
+      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{relativeTime(p.updated_at)}</span>
+        {onArchive && (
+          <button title="Archive" onClick={onArchive} disabled={switchingProject} style={{
+            background: 'transparent', border: 'none', cursor: switchingProject ? 'default' : 'pointer',
+            color: 'var(--text-muted)', padding: '2px', display: 'flex',
+          }}>
+            <i className="ti ti-archive" aria-hidden="true" style={{ fontSize: '14px' }} />
+          </button>
+        )}
+        <button disabled={switchingProject} onClick={onOpen} style={{ background: 'transparent', border: 'none', cursor: switchingProject ? 'default' : 'pointer', padding: '2px', display: 'flex' }}>
+          <i className="ti ti-arrow-right" aria-hidden="true" style={{ fontSize: '14px', color: isActive ? 'var(--text-accent)' : 'var(--text-muted)' }} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel, projectId, projectsList, onSwitchProject, onNewProject, onArchiveProject, onUnarchiveProject, switchingProject }) {
   var hour = new Date().getHours();
   var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  var showArchivedSt = useState(false), showArchived = showArchivedSt[0], setShowArchived = showArchivedSt[1];
   // Resume affordance - without this, a returning user with a saved
   // interview/model/report in progress has no way to know it, and lands on
   // the same blank 3-card picker as a brand-new visitor every time.
   var hasExtraction = !!(convExtraction && Object.keys(convExtraction).length > 0);
   var hasDraft = !!(report || convModel || hasExtraction);
   var activePct = hasDraft ? computeCompletionPct(convModel || convExtraction) : 0;
-  var list = projectsList || [];
-  // Stays a single quiet resume banner for the common one-project case (no
-  // list chrome for someone who's never needed a switcher); upgrades to the
-  // full "Your businesses" list the moment there's actually more than one,
-  // or the New Business action becomes relevant because there's something
-  // on the current one worth branching off from.
-  var showBusinessPanel = hasDraft || list.length > 1;
+  var allProjects = projectsList || [];
+  var liveProjects = allProjects.filter(function (p) { return p.status !== 'archived'; });
+  var archivedProjects = allProjects.filter(function (p) { return p.status === 'archived'; });
+  // Stays a single quiet row for the common one-project case; upgrades to
+  // the full list the moment there's more than one, or once there's a New
+  // Business action worth surfacing (something exists on the current one to
+  // branch off from). Capped height below, not unbounded growth - the
+  // panel's footprint stays fixed no matter how many businesses accumulate.
+  var showBusinessPanel = hasDraft || liveProjects.length > 1;
 
   return (
     <div style={{ padding: '32px', maxWidth: '760px', margin: '0 auto' }}>
       <h1 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 4px' }}>{greeting}.</h1>
       <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 28px' }}>What would you like to do today?</p>
-      {showBusinessPanel && (
-        <div style={{ marginBottom: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <p style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-muted)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Your businesses</p>
-            {onNewProject && (
-              <button onClick={onNewProject} disabled={switchingProject} style={{
-                fontSize: '12px', fontWeight: '600', color: 'var(--text-accent)', background: 'transparent', border: 'none',
-                cursor: switchingProject ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: '4px', padding: 0,
-              }}>
-                <i className="ti ti-plus" aria-hidden="true" style={{ fontSize: '13px' }} /> New Business
-              </button>
-            )}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {list.map(function (p) {
-              var isActive = p.id === projectId;
-              return (
-                <button key={p.id} disabled={switchingProject}
-                  onClick={function () { onCard ? (isActive ? onCard('analyst') : onSwitchProject(p.id)) : null; }}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
-                    textAlign: 'left', padding: '14px 18px', borderRadius: '12px',
-                    border: '1px solid ' + (isActive ? 'var(--border-accent)' : 'var(--border)'),
-                    background: isActive ? 'var(--bg-accent)' : 'var(--surface-2)',
-                    cursor: switchingProject ? 'default' : 'pointer', opacity: switchingProject ? 0.6 : 1,
-                  }}>
-                  <div>
-                    <p style={{ fontSize: '13px', fontWeight: '600', color: isActive ? 'var(--text-accent)' : 'var(--text-primary)', margin: '0 0 3px' }}>
-                      {p.name}{isActive ? ' · Active' : ''}
-                    </p>
-                    <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: 0 }}>
-                      {projectStatusLabel(p.status)}{isActive && hasDraft ? ' · ' + activePct + '% confirmed' : ''} · updated {relativeTime(p.updated_at)}
-                    </p>
-                  </div>
-                  <i className="ti ti-arrow-right" aria-hidden="true" style={{ fontSize: '15px', color: isActive ? 'var(--text-accent)' : 'var(--text-muted)', flexShrink: 0 }} />
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginBottom: showBusinessPanel ? '28px' : 0 }}>
         {ACTION_CARDS.map(function (c) {
           var isLoading = loadingKey === c.key;
           return (
@@ -190,6 +194,54 @@ function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel, pro
           );
         })}
       </div>
+
+      {showBusinessPanel && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <p style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-muted)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Your businesses</p>
+            {onNewProject && (
+              <button onClick={onNewProject} disabled={switchingProject} style={{
+                fontSize: '12px', fontWeight: '600', color: 'var(--text-accent)', background: 'transparent', border: 'none',
+                cursor: switchingProject ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: '4px', padding: 0,
+              }}>
+                <i className="ti ti-plus" aria-hidden="true" style={{ fontSize: '13px' }} /> New Business
+              </button>
+            )}
+          </div>
+          {/* Bounded height + scroll, not unbounded growth - this is the
+              whole fix for "the more business I add, cards go further
+              down": the panel's footprint stops growing past ~5 rows
+              regardless of how many businesses the account has. */}
+          <div style={{ border: '1px solid var(--border)', borderRadius: '12px', maxHeight: '260px', overflowY: 'auto' }}>
+            {liveProjects.map(function (p) {
+              var isActive = p.id === projectId;
+              return (
+                <BusinessRow key={p.id} p={p} isActive={isActive} hasDraft={hasDraft} activePct={activePct} switchingProject={switchingProject}
+                  onOpen={function () { isActive ? onCard('analyst') : onSwitchProject(p.id); }}
+                  onArchive={isActive ? null : function (e) { e.stopPropagation(); onArchiveProject(p.id); }} />
+              );
+            })}
+          </div>
+          {archivedProjects.length > 0 && (
+            <div style={{ marginTop: '8px' }}>
+              <button onClick={function () { setShowArchived(!showArchived); }} style={{
+                fontSize: '11px', color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
+              }}>{showArchived ? 'Hide' : 'Show'} {archivedProjects.length} archived</button>
+              {showArchived && (
+                <div style={{ border: '1px solid var(--border)', borderRadius: '12px', marginTop: '8px', maxHeight: '200px', overflowY: 'auto' }}>
+                  {archivedProjects.map(function (p) {
+                    return (
+                      <BusinessRow key={p.id} p={p} isActive={false} hasDraft={false} activePct={0} switchingProject={switchingProject}
+                        onOpen={function () { onUnarchiveProject(p.id); }}
+                        onArchive={null} />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -209,10 +261,10 @@ function ComingNextPanel({ title, note }) {
   );
 }
 
-function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, cardLoading, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange, projectsList, onSwitchProject, onNewProject, switchingProject }) {
+function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, cardLoading, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange, projectsList, onSwitchProject, onNewProject, onArchiveProject, onUnarchiveProject, switchingProject }) {
   return (
     <div style={{ width: '65%', flex: 1, height: '100%', overflowY: 'auto', background: 'var(--surface-0)' }}>
-      {convPhase === 'discovery' && <HomeScreen onCard={onCard} loadingKey={cardLoading} report={report} convExtraction={convExtraction} convModel={convModel} projectId={projectId} projectsList={projectsList} onSwitchProject={onSwitchProject} onNewProject={onNewProject} switchingProject={switchingProject} />}
+      {convPhase === 'discovery' && <HomeScreen onCard={onCard} loadingKey={cardLoading} report={report} convExtraction={convExtraction} convModel={convModel} projectId={projectId} projectsList={projectsList} onSwitchProject={onSwitchProject} onNewProject={onNewProject} onArchiveProject={onArchiveProject} onUnarchiveProject={onUnarchiveProject} switchingProject={switchingProject} />}
 
       {convPhase === 'valuation' && (
         <ValuationPlatform
@@ -460,6 +512,35 @@ export default function Platform({ user, sessionId, onSignOut }) {
     supabase.from('projects').update({ updated_at: new Date().toISOString() }).eq('id', pid).then(function () {}).catch(function () {});
   }
 
+  // Soft-delete only - archiving sets status and hides the project from the
+  // default switcher list, it never drops the row (or the conversation/
+  // report rows hanging off it via project_id). Reversible via
+  // unarchiveProject. A true permanent delete isn't offered here on
+  // purpose - this is exactly the kind of data an earlier round of this
+  // build already lost once by accident; nothing here should risk that
+  // again for a feature whose whole point is decluttering a list.
+  function archiveProject(pid) {
+    if (!pid || pid === projectId) return; // never archive the one currently open
+    supabase.from('projects').update({ status: 'archived' }).eq('id', pid)
+      .then(function () { refreshProjectsList(); }).catch(function () {});
+  }
+  function unarchiveProject(pid) {
+    if (!pid) return;
+    // Recompute rather than blindly resetting to 'draft' - the column has
+    // no "status before archiving" memory, so a project that was actually
+    // model_complete before being archived needs that re-derived from
+    // whether it still has a report/model, not just reset to draft.
+    Promise.all([
+      supabase.from('financial_model_reports').select('id').eq('project_id', pid).limit(1).maybeSingle(),
+      supabase.from('ai_conversations').select('model').eq('project_id', pid).not('model', 'is', null).limit(1).maybeSingle(),
+    ]).then(function (results) {
+      var hasReport = !!(results[0] && results[0].data);
+      var hasModel = !!(results[1] && results[1].data);
+      var status = hasReport || hasModel ? 'model_complete' : 'draft';
+      return supabase.from('projects').update({ status: status, updated_at: new Date().toISOString() }).eq('id', pid);
+    }).then(function () { refreshProjectsList(); }).catch(function () {});
+  }
+
   useEffect(function () {
     var cancelled = false;
     if (!user || !user.id) return undefined; // anonymous - untouched, localStorage-only as before
@@ -467,7 +548,10 @@ export default function Platform({ user, sessionId, onSignOut }) {
     refreshProjectsList()
       .then(function (list) {
         if (cancelled) return null;
-        if (list.length > 0) return list[0]; // already sorted by updated_at desc
+        // Never auto-select an archived project as the default active one,
+        // even if it happens to be the most recently updated row.
+        var live = list.filter(function (p) { return p.status !== 'archived'; });
+        if (live.length > 0) return live[0]; // already sorted by updated_at desc
         // First time this account has ever reached the platform - give them
         // a project to attach state to from the very first turn, rather
         // than creating one lazily mid-interview and risking an early turn
@@ -767,6 +851,8 @@ export default function Platform({ user, sessionId, onSignOut }) {
           projectsList={projectsList}
           onSwitchProject={switchProject}
           onNewProject={createNewProject}
+          onArchiveProject={archiveProject}
+          onUnarchiveProject={unarchiveProject}
           switchingProject={switchingProject}
         />
       </div>
