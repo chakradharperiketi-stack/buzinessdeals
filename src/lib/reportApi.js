@@ -10,7 +10,7 @@ const ANON_KEY = 'sb_publishable_0Xkatb8dUNbdP44AWek6Hg_Br4SNyf2';
 // Throws on failure - callers show their own error state; this never
 // swallows an error the way persistConversation-style best-effort calls do,
 // because report generation is the thing the user is actively waiting on.
-export async function generateFinancialReport({ sessionId, userId = null, extraction }) {
+export async function generateFinancialReport({ sessionId, userId = null, projectId = null, extraction }) {
   const res = await fetch(GENERATE_REPORT_URL, {
     method: 'POST',
     headers: {
@@ -18,7 +18,7 @@ export async function generateFinancialReport({ sessionId, userId = null, extrac
       apikey: ANON_KEY,
       Authorization: 'Bearer ' + ANON_KEY,
     },
-    body: JSON.stringify({ sessionId, userId, extraction }),
+    body: JSON.stringify({ sessionId, userId, projectId, extraction }),
   });
 
   const data = await res.json().catch(() => ({}));
