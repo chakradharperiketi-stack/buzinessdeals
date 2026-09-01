@@ -161,7 +161,10 @@ function NavBar(props) {
       background: '#1a2332', padding: '14px 24px', display: 'flex', alignItems: 'center',
       justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100, flexWrap: 'wrap', gap: '12px',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <button onClick={props.onLogoClick} style={{
+        display: 'flex', alignItems: 'center', gap: '10px', background: 'transparent',
+        border: 'none', padding: 0, margin: 0, cursor: 'pointer', textAlign: 'left',
+      }}>
         <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <span style={{ fontSize: '14px', fontWeight: '700', color: '#fff' }}>BD</span>
         </div>
@@ -169,7 +172,7 @@ function NavBar(props) {
           <span style={{ fontSize: '15px', fontWeight: '600', color: '#fff', lineHeight: '1.1' }}>BuzinessDeals</span>
           <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', lineHeight: '1.1' }}>by Zenius Advisors</span>
         </div>
-      </div>
+      </button>
       <div style={{ display: 'flex', gap: '22px', alignItems: 'center' }} className="bd-nav-links">
         <a href="#listings" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>Browse listings</a>
         <a href="#for-sellers" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>For sellers</a>
@@ -538,6 +541,17 @@ export default function LandingPage({ sessionId }) {
     setInput('');
   }
 
+  // Clicking the logo should behave like a "home" link: clear whatever
+  // in-progress state is showing (chat, category filter, listing detail,
+  // any open auth modal) and scroll back to the very top of the page.
+  function goHome() {
+    resetConversation();
+    setActiveCategory(null);
+    setExploring(null);
+    setAuthModal(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   function handleCategoryClick(cat) {
     setExploring(null);
     setActiveCategory(activeCategory === cat.key ? null : cat.key);
@@ -631,7 +645,7 @@ export default function LandingPage({ sessionId }) {
       {authModal && <AuthModal mode={authModal} onClose={function () { setAuthModal(null); }} />}
 
       {/* ===== 1. NAVIGATION ===== */}
-      <NavBar onSignIn={function () { setAuthModal('signin'); }} onGetStarted={function () { setAuthModal('signup'); }} />
+      <NavBar onLogoClick={goHome} onSignIn={function () { setAuthModal('signin'); }} onGetStarted={function () { setAuthModal('signup'); }} />
 
       {/* ===== 2. AI CHAT HERO ===== */}
       <section style={{
