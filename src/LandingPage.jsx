@@ -10,11 +10,17 @@ var MAX_ANON_EXCHANGES = 5;
 var SUGGESTED_PROMPTS = [
   'What is my business worth?',
   'Show me businesses for sale in Hyderabad',
+  'I want to invest 2 crore',
   'I need a FEMA valuation',
   'How does this platform work?',
 ];
 
-var TRUST_BADGES = ['Damodaran India data', 'Minutes, not weeks', 'CA-grade tools', 'Zenius Advisors'];
+var TRUST_BADGES = [
+  { title: 'Damodaran India', sub: 'Valuation methodology' },
+  { title: 'Minutes not weeks', sub: 'Report delivery' },
+  { title: 'CA-grade tools', sub: 'Platform' },
+  { title: 'Zenius Advisors', sub: 'Advisory' },
+];
 
 // Pathway 1 (direct discovery) categories - clicking one both filters the
 // grid and seeds the AI conversation with context, per spec section 2.
@@ -105,10 +111,14 @@ export default function LandingPage({ sessionId }) {
       });
   }, []);
 
+  // The conversation grows in the page's own flow now (no boxed, internally
+  // scrolling card), so "scroll to latest" means scrolling the page itself
+  // to a sentinel just past the last message - not setting scrollTop on a
+  // container that no longer scrolls internally.
   useEffect(function () {
-    if (scrollRef.current) {
+    if (isChatting && scrollRef.current) {
       setTimeout(function () {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        if (scrollRef.current) scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
       }, 50);
     }
   }, [messages, loading]);
@@ -227,13 +237,17 @@ export default function LandingPage({ sessionId }) {
         </div>
         <div style={{ display: 'flex', gap: '22px', alignItems: 'center' }} className="bd-nav-links">
           <a href="#listings" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>Browse listings</a>
-          <a href="#how-it-works" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>How it works</a>
+          <a href="#for-sellers" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>For sellers</a>
+          <a href="#for-buyers" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>For buyers</a>
           <a href="#for-investors" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>For investors</a>
           <a href="#professional-tools" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>AI model & valuation</a>
           <a href="#pricing" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>Pricing</a>
           <a href="#contact" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>Contact us</a>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+          <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.45)' }} className="bd-nav-contact">
+            <a href="mailto:zeniusadvisors@gmail.com" style={{ color: 'rgba(255,255,255,0.45)', textDecoration: 'none' }}>zeniusadvisors@gmail.com</a>
+          </span>
           <button onClick={function () { setAuthModal('signin'); }} style={{
             background: 'transparent', border: '1px solid rgba(255,255,255,0.25)', color: '#fff',
             padding: '8px 16px', borderRadius: '8px', fontSize: '13px', cursor: 'pointer',
@@ -253,24 +267,22 @@ export default function LandingPage({ sessionId }) {
         opacity: discoveryHasFocus ? 0.55 : 1,
         transition: 'filter 0.3s, opacity 0.3s',
       }}>
-        {!isChatting && (
-          <>
-            <p style={{ fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#60a5fa', margin: '0 0 12px', fontWeight: '600' }}>
-              India's first AI-powered business marketplace
-            </p>
-            <h1 style={{
-              fontSize: 'clamp(26px, 4vw, 40px)', fontWeight: '700', color: '#fff', textAlign: 'center',
-              margin: '0 0 12px', maxWidth: '720px', lineHeight: '1.25',
-            }}>
-              Buy, Sell or Invest in Indian Businesses
-            </h1>
-            <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.6)', textAlign: 'center', margin: '0 0 32px', maxWidth: '560px' }}>
-              Talk to our AI Business Advisor — get intelligent guidance on buying, selling, investing in, or valuing a business.
-            </p>
-          </>
-        )}
+        {/* Headline stays visible whether or not a conversation is running -
+            the advisor answers underneath it, it doesn't replace it. */}
+        <p style={{ fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#60a5fa', margin: '0 0 12px', fontWeight: '600' }}>
+          <span aria-hidden="true">✦</span> India's first AI-powered business marketplace
+        </p>
+        <h1 style={{
+          fontSize: 'clamp(26px, 4vw, 40px)', fontWeight: '700', color: '#fff', textAlign: 'center',
+          margin: '0 0 12px', maxWidth: '720px', lineHeight: '1.25',
+        }}>
+          Buy, Sell or Invest in Indian Businesses
+        </h1>
+        <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.6)', textAlign: 'center', margin: '0 0 32px', maxWidth: '560px' }}>
+          Talk to our AI advisor — get guidance on buying, selling, investing or valuing a business.
+        </p>
 
-        <div style={{ width: '100%', maxWidth: '680px' }}>
+        <div style={{ width: '100%', maxWidth: '700px' }}>
           {!isChatting && (
             <>
               <div style={{
@@ -278,7 +290,7 @@ export default function LandingPage({ sessionId }) {
                 display: 'flex', alignItems: 'flex-end', gap: '10px', boxShadow: '0 12px 32px rgba(0,0,0,0.35)',
                 border: '1px solid rgba(255,255,255,0.6)',
               }}>
-                <i className="ti ti-search" aria-hidden="true" style={{ fontSize: '16px', color: '#94a3b8', marginBottom: '11px' }} />
+                <span aria-hidden="true" style={{ fontSize: '15px', color: '#4f46e5', marginBottom: '12px' }}>✦</span>
                 <textarea
                   ref={heroInputRef}
                   rows={1}
@@ -289,7 +301,7 @@ export default function LandingPage({ sessionId }) {
                   onKeyDown={function (e) {
                     if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); sendMessage(); }
                   }}
-                  placeholder={atLimit ? 'Create an account to continue...' : 'Ask me anything — sell my business, invest in a company, get a FEMA valuation...'}
+                  placeholder={atLimit ? 'Create an account to continue...' : 'Ask me anything — sell my business, invest 2 crore, FEMA valuation...'}
                   style={{
                     flex: 1, border: 'none', outline: 'none', fontSize: '14px', padding: '9px 0',
                     resize: 'none', overflowY: 'auto', maxHeight: '120px', lineHeight: '1.5', fontFamily: 'inherit',
@@ -320,15 +332,15 @@ export default function LandingPage({ sessionId }) {
               </div>
 
               <div style={{
-                display: 'flex', flexWrap: 'wrap', gap: '18px', justifyContent: 'center',
+                display: 'flex', flexWrap: 'wrap', gap: '28px', justifyContent: 'center',
                 marginTop: '26px', paddingTop: '18px', borderTop: '1px solid rgba(255,255,255,0.08)',
               }}>
-                {TRUST_BADGES.map(function (b, i) {
+                {TRUST_BADGES.map(function (b) {
                   return (
-                    <span key={b} style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
-                      <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', fontWeight: '500' }}>{b}</span>
-                      {i < TRUST_BADGES.length - 1 && <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'rgba(255,255,255,0.25)' }} />}
-                    </span>
+                    <div key={b.title} style={{ textAlign: 'center' }}>
+                      <p style={{ fontSize: '12px', fontWeight: '600', color: 'rgba(255,255,255,0.85)', margin: '0 0 2px' }}>{b.title}</p>
+                      <p style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', margin: 0 }}>{b.sub}</p>
+                    </div>
                   );
                 })}
               </div>
@@ -336,50 +348,46 @@ export default function LandingPage({ sessionId }) {
           )}
 
           {isChatting && (
-            // No card, no border, no boxShadow - the conversation flows
-            // directly in the hero's own background, like the page itself
-            // is talking with you, not a widget dropped onto the page.
-            <div onFocus={reclaimChatFocus} style={{ display: 'flex', flexDirection: 'column', height: 'min(560px, 72vh)' }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                paddingBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.1)', flexShrink: 0,
-              }}>
-                <span style={{ fontSize: '11px', fontWeight: '600', letterSpacing: '0.04em', textTransform: 'uppercase', color: '#60a5fa' }}>
-                  AI Business Advisor
-                </span>
-                <button onClick={resetConversation} title="Clear conversation and start over" style={{
-                  fontSize: '11px', color: 'rgba(255,255,255,0.5)', background: 'transparent',
-                  border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer',
-                }}>Clear conversation and start over</button>
-              </div>
-
-              {/* Transcript - grows, scrolls; input stays pinned below. The
-                  advisor's own replies carry no bubble at all, only your
-                  own messages get a light tint, so the AI's voice reads as
-                  the page's own narration rather than a chatbot talking
-                  back from inside a box. */}
-              <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 2px' }}>
-                {messages.map(function (m, i) {
-                  var isUser = m.role === 'user';
-                  if (isUser) {
-                    return (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '14px' }}>
-                        <div style={{
-                          maxWidth: '82%', padding: '9px 13px', borderRadius: '10px 10px 2px 10px',
-                          fontSize: '13px', lineHeight: '1.55', whiteSpace: 'pre-wrap',
-                          background: 'rgba(37,99,235,0.22)', color: '#bfdbfe', fontWeight: '500',
-                        }}>{m.text}</div>
-                      </div>
-                    );
-                  }
+            // No card, no border, no fixed height, no internal scrollbar -
+            // the conversation grows in the page's own flow, directly on
+            // the hero's background, the way the page itself would narrate
+            // back to you rather than a chatbot answering from inside a box.
+            <div onFocus={reclaimChatFocus} style={{ display: 'flex', flexDirection: 'column' }}>
+              {messages.map(function (m, i) {
+                var isUser = m.role === 'user';
+                if (isUser) {
                   return (
-                    <div key={i} style={{
-                      marginBottom: '16px', fontSize: '13px', lineHeight: '1.65', whiteSpace: 'pre-wrap', color: 'rgba(255,255,255,0.9)',
-                    }}>{m.text}</div>
+                    <div key={i} style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '14px' }}>
+                      <div style={{
+                        maxWidth: '78%', padding: '10px 15px', borderRadius: '12px 12px 3px 12px',
+                        fontSize: '13px', lineHeight: '1.55', whiteSpace: 'pre-wrap',
+                        background: '#2563eb', color: '#fff', fontWeight: '500',
+                      }}>{m.text}</div>
+                    </div>
                   );
-                })}
-                {loading && (
-                  <div style={{ display: 'flex', gap: '4px', padding: '4px 2px' }}>
+                }
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '14px' }}>
+                    <span aria-hidden="true" style={{
+                      width: '28px', height: '28px', borderRadius: '9px', background: '#4f46e5', flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', color: '#fff', marginTop: '2px',
+                    }}>✦</span>
+                    <div style={{
+                      maxWidth: '78%', padding: '12px 16px', borderRadius: '4px 12px 12px 12px',
+                      fontSize: '13px', lineHeight: '1.6', whiteSpace: 'pre-wrap', color: 'rgba(255,255,255,0.92)',
+                      background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                    }}>{m.text}</div>
+                  </div>
+                );
+              })}
+
+              {loading && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+                  <span aria-hidden="true" style={{
+                    width: '28px', height: '28px', borderRadius: '9px', background: '#4f46e5', flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', color: '#fff',
+                  }}>✦</span>
+                  <div style={{ display: 'flex', gap: '4px', padding: '12px 16px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px 12px 12px 12px' }}>
                     {[0, 1, 2].map(function (i) {
                       return <span key={i} style={{
                         width: '5px', height: '5px', borderRadius: '50%', background: 'rgba(255,255,255,0.6)',
@@ -387,70 +395,82 @@ export default function LandingPage({ sessionId }) {
                       }} />;
                     })}
                   </div>
-                )}
-
-                {lastAction && !atLimit && (
-                  <div style={{ marginTop: '6px' }}>
-                    <button onClick={handleActionClick} style={{
-                      background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px',
-                      padding: '10px 16px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
-                    }}>{lastAction.label || 'Continue →'}</button>
-                  </div>
-                )}
-
-                {atLimit && (
-                  <div style={{
-                    marginTop: '10px', padding: '16px', background: 'rgba(37,99,235,0.15)',
-                    border: '1px solid rgba(96,165,250,0.4)', borderRadius: '12px',
-                  }}>
-                    <p style={{ fontSize: '13px', color: '#fff', lineHeight: '1.6', margin: '0 0 12px' }}>
-                      I have a good picture of your situation. To continue and get specific recommendations - create a free account. Your conversation will be saved exactly where we left off.
-                    </p>
-                    <button onClick={function () { setAuthModal('signup'); }} style={{
-                      background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px',
-                      padding: '10px 18px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
-                    }}>Create free account →</button>
-                  </div>
-                )}
-              </div>
-
-              {/* Follow-up input - a plain bar with just a divider above it,
-                  not a separate floating pill card. */}
-              {!atLimit && (
-                <div style={{ paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'flex-end', gap: '8px', background: 'rgba(255,255,255,0.05)',
-                    border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px', padding: '5px 5px 5px 14px',
-                  }}>
-                    <textarea
-                      ref={heroInputRef}
-                      rows={1}
-                      value={input}
-                      onFocus={reclaimChatFocus}
-                      onChange={function (e) { setInput(e.target.value); }}
-                      onKeyDown={function (e) {
-                        if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); sendMessage(); }
-                      }}
-                      placeholder="Type your message... (Shift+Enter for a new line)"
-                      style={{
-                        flex: 1, border: 'none', outline: 'none', background: 'transparent', color: '#fff',
-                        fontSize: '13px', padding: '8px 0', resize: 'none', overflowY: 'auto',
-                        maxHeight: '110px', lineHeight: '1.5', fontFamily: 'inherit',
-                      }}
-                    />
-                    <button
-                      onClick={function () { sendMessage(); }}
-                      disabled={loading || !input.trim()}
-                      style={{
-                        width: '30px', height: '30px', borderRadius: '7px', flexShrink: 0, border: 'none', marginBottom: '2px',
-                        background: loading || !input.trim() ? 'rgba(255,255,255,0.12)' : '#2563eb', color: '#fff',
-                        cursor: loading || !input.trim() ? 'default' : 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px',
-                      }}
-                    >→</button>
-                  </div>
                 </div>
               )}
+
+              {lastAction && !atLimit && (
+                <div style={{ marginLeft: '38px', marginBottom: '10px' }}>
+                  <button onClick={handleActionClick} style={{
+                    background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px',
+                    padding: '10px 16px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
+                  }}>{lastAction.label || 'Continue →'}</button>
+                </div>
+              )}
+
+              {atLimit && (
+                <div style={{
+                  marginLeft: '38px', marginBottom: '10px', padding: '16px', background: 'rgba(37,99,235,0.15)',
+                  border: '1px solid rgba(96,165,250,0.4)', borderRadius: '12px',
+                }}>
+                  <p style={{ fontSize: '13px', color: '#fff', lineHeight: '1.6', margin: '0 0 12px' }}>
+                    I have a good picture of your situation. To continue and get specific recommendations - create a free account. Your conversation will be saved exactly where we left off.
+                  </p>
+                  <button onClick={function () { setAuthModal('signup'); }} style={{
+                    background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px',
+                    padding: '10px 18px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
+                  }}>Create free account →</button>
+                </div>
+              )}
+
+              {/* Follow-up input - a plain bar, not a floating card. */}
+              {!atLimit && (
+                <div style={{
+                  display: 'flex', alignItems: 'flex-end', gap: '8px', background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', padding: '6px 6px 6px 16px', marginTop: '6px',
+                }}>
+                  <span aria-hidden="true" style={{ fontSize: '14px', color: '#818cf8', marginBottom: '11px' }}>✦</span>
+                  <textarea
+                    ref={heroInputRef}
+                    rows={1}
+                    value={input}
+                    onFocus={reclaimChatFocus}
+                    onChange={function (e) { setInput(e.target.value); }}
+                    onKeyDown={function (e) {
+                      if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); sendMessage(); }
+                    }}
+                    placeholder="Ask a follow-up question..."
+                    style={{
+                      flex: 1, border: 'none', outline: 'none', background: 'transparent', color: '#fff',
+                      fontSize: '13px', padding: '9px 0', resize: 'none', overflowY: 'auto',
+                      maxHeight: '110px', lineHeight: '1.5', fontFamily: 'inherit',
+                    }}
+                  />
+                  <button
+                    onClick={function () { sendMessage(); }}
+                    disabled={loading || !input.trim()}
+                    style={{
+                      flexShrink: 0, border: 'none', borderRadius: '11px', padding: '10px 16px', marginBottom: '1px',
+                      background: loading || !input.trim() ? 'rgba(255,255,255,0.12)' : '#2563eb',
+                      color: loading || !input.trim() ? 'rgba(255,255,255,0.4)' : '#fff',
+                      cursor: loading || !input.trim() ? 'default' : 'pointer',
+                      display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '600',
+                    }}
+                  >Ask <span aria-hidden="true">→</span></button>
+                </div>
+              )}
+
+              <div style={{ textAlign: 'center', marginTop: '18px' }}>
+                <button onClick={resetConversation} style={{
+                  display: 'block', margin: '0 auto', fontSize: '12px', color: 'rgba(255,255,255,0.4)',
+                  background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px',
+                }}>Clear conversation and start over</button>
+                <a href="#listings" style={{
+                  display: 'inline-block', marginTop: '4px', fontSize: '12px', color: 'rgba(255,255,255,0.4)', textDecoration: 'none',
+                }}>⌄ Browse listings below</a>
+              </div>
+
+              {/* Scroll-into-view target, not a visible element. */}
+              <div ref={scrollRef} />
             </div>
           )}
         </div>
@@ -565,12 +585,12 @@ export default function LandingPage({ sessionId }) {
         <h2 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)', textAlign: 'center', margin: '0 0 32px' }}>How it works</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '20px' }}>
           {[
-            { icon: 'ti-search', title: 'Buy or invest', desc: 'Tell our AI advisor your budget, sector and geography. Get matched to verified listings and receive an Acquisition Brief.' },
-            { icon: 'ti-building', title: 'Sell or raise capital', desc: 'Our AI financial analyst interviews you about your operations and builds a defensible P&L - no spreadsheets required.' },
-            { icon: 'ti-report-analytics', title: 'Get a valuation', desc: 'A 9-section DCF valuation engine using Damodaran India data, reviewed by Zenius Advisors CAs.' },
+            { anchorId: 'for-buyers', icon: 'ti-search', title: 'Buy or invest', desc: 'Tell our AI advisor your budget, sector and geography. Get matched to verified listings and receive an Acquisition Brief.' },
+            { anchorId: 'for-sellers', icon: 'ti-building', title: 'Sell or raise capital', desc: 'Our AI financial analyst interviews you about your operations and builds a defensible P&L - no spreadsheets required.' },
+            { anchorId: null, icon: 'ti-report-analytics', title: 'Get a valuation', desc: 'A 9-section DCF valuation engine using Damodaran India data, reviewed by Zenius Advisors CAs.' },
           ].map(function (c) {
             return (
-              <div key={c.title} style={{ padding: '24px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '14px' }}>
+              <div key={c.title} id={c.anchorId || undefined} style={{ padding: '24px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '14px', scrollMarginTop: '80px' }}>
                 <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'var(--bg-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
                   <i className={'ti ' + c.icon} aria-hidden="true" style={{ fontSize: '19px', color: 'var(--text-accent)' }} />
                 </div>
