@@ -73,6 +73,7 @@ function briefToContext(brief) {
 export default function ConversationEngine({
   user,
   sessionId,
+  projectId,
   brief,
   // Cumulative analyst-phase state, echoed back to ai-search-v2 each turn so
   // it never has to re-derive "what's already known" from raw chat history -
@@ -212,6 +213,7 @@ export default function ConversationEngine({
       userContext: briefToContext(brief),
       sessionId: sessionId,
       userId: user ? user.id : null,
+      projectId: projectId || null,
       conversationPhase: phase,
       exchangeCount: exCount,
       priorExtraction: priorExtraction && Object.keys(priorExtraction).length ? priorExtraction : null,
