@@ -666,7 +666,7 @@ export default function LandingPage({ sessionId }) {
           {!isChatting && (
             <>
               <div style={{
-                background: 'rgba(255,255,255,0.07)', borderRadius: '18px', padding: '10px 10px 10px 20px',
+                background: 'rgba(255,255,255,0.07)', borderRadius: '999px', padding: '10px 10px 10px 20px',
                 display: 'flex', alignItems: 'flex-end', gap: '10px', boxShadow: '0 12px 32px rgba(0,0,0,0.3)',
                 border: '1px solid rgba(255,255,255,0.18)',
               }}>
@@ -693,7 +693,7 @@ export default function LandingPage({ sessionId }) {
                   onClick={function () { sendMessage(); }}
                   disabled={atLimit || loading || !input.trim()}
                   style={{
-                    flexShrink: 0, border: 'none', borderRadius: '14px', padding: '11px 18px',
+                    flexShrink: 0, border: 'none', borderRadius: '999px', padding: '11px 18px',
                     background: atLimit || loading || !input.trim() ? 'rgba(255,255,255,0.12)' : '#2563eb',
                     color: atLimit || loading || !input.trim() ? 'rgba(255,255,255,0.4)' : '#fff',
                     cursor: atLimit || loading || !input.trim() ? 'default' : 'pointer',
@@ -804,7 +804,7 @@ export default function LandingPage({ sessionId }) {
               {!atLimit && (
                 <div style={{
                   display: 'flex', alignItems: 'flex-end', gap: '8px', background: 'rgba(255,255,255,0.05)',
-                  border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', padding: '6px 6px 6px 16px', marginTop: '6px',
+                  border: '1px solid rgba(255,255,255,0.12)', borderRadius: '999px', padding: '6px 6px 6px 16px', marginTop: '6px',
                 }}>
                   <i className="ti ti-sparkles" aria-hidden="true" style={{ fontSize: '14px', color: '#818cf8', marginBottom: '11px' }} />
                   <textarea
@@ -828,7 +828,7 @@ export default function LandingPage({ sessionId }) {
                     onClick={function () { sendMessage(); }}
                     disabled={loading || !input.trim()}
                     style={{
-                      flexShrink: 0, border: 'none', borderRadius: '11px', padding: '10px 16px', marginBottom: '1px',
+                      flexShrink: 0, border: 'none', borderRadius: '999px', padding: '10px 16px', marginBottom: '1px',
                       background: loading || !input.trim() ? 'rgba(255,255,255,0.12)' : '#2563eb',
                       color: loading || !input.trim() ? 'rgba(255,255,255,0.4)' : '#fff',
                       cursor: loading || !input.trim() ? 'default' : 'pointer',
