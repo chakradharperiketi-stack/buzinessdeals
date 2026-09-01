@@ -73,7 +73,7 @@ input[type="email"],
 input[type="password"],
 input[type="date"],
 input[type="tel"],
-textarea,
+textarea:not(.bd-hero-input),
 select {
   border: 1.5px solid #c4cdd9 !important;
   border-radius: 8px !important;
@@ -93,7 +93,7 @@ input[type="email"]:focus,
 input[type="password"]:focus,
 input[type="date"]:focus,
 input[type="tel"]:focus,
-textarea:focus,
+textarea:not(.bd-hero-input):focus,
 select:focus {
   border-color: #2563eb !important;
   box-shadow: 0 0 0 3px rgba(37,99,235,0.15) !important;
@@ -101,10 +101,31 @@ select:focus {
   background: #ffffff !important;
 }
 
+/* The dark, chromeless hero search box (LandingPage.jsx) intentionally
+   breaks from the site-wide white/light form-field look above - it lives
+   on a dark gradient section and needs to stay transparent with light
+   text, so it is excluded from those rules (:not(.bd-hero-input)) and
+   styled directly here instead of fighting !important with !important. */
+textarea.bd-hero-input,
+textarea.bd-hero-input:focus {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  color: #fff !important;
+  width: auto;
+}
+
 input::placeholder,
-textarea::placeholder {
+textarea:not(.bd-hero-input)::placeholder {
   color: #a0b0c4 !important;
   font-size: 13px;
+}
+
+textarea.bd-hero-input::placeholder {
+  color: rgba(255, 255, 255, 0.45) !important;
+  opacity: 1;
 }
 
 input[type="text"]:disabled,
