@@ -90,7 +90,24 @@ function NavBar({ user, isAdmin, onHome, onGoListings, onSignOut }) {
   );
 }
 
-function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel }) {
+function projectStatusLabel(status) {
+  if (status === 'model_complete') return 'Model complete';
+  if (status === 'listed') return 'Listed';
+  if (status === 'archived') return 'Archived';
+  return 'Draft';
+}
+function relativeTime(iso) {
+  if (!iso) return '';
+  var diffMs = Date.now() - new Date(iso).getTime();
+  var mins = Math.round(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + 'm ago';
+  var hrs = Math.round(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  return Math.round(hrs / 24) + 'd ago';
+}
+
+function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel, projectId, projectsList, onSwitchProject, onNewProject, switchingProject }) {
   var hour = new Date().getHours();
   var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   // Resume affordance - without this, a returning user with a saved
@@ -98,25 +115,59 @@ function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel }) {
   // the same blank 3-card picker as a brand-new visitor every time.
   var hasExtraction = !!(convExtraction && Object.keys(convExtraction).length > 0);
   var hasDraft = !!(report || convModel || hasExtraction);
-  var bizName = (convExtraction && convExtraction.businessProfile && convExtraction.businessProfile.name) || (convExtraction && convExtraction.businessProfile && convExtraction.businessProfile.businessType) || 'Your business';
-  var statusLabel = report ? 'Report ready' : convModel ? 'Model complete - report not generated yet' : 'Interview in progress';
-  var draftPct = hasDraft ? computeCompletionPct(convModel || convExtraction) : 0;
+  var activePct = hasDraft ? computeCompletionPct(convModel || convExtraction) : 0;
+  var list = projectsList || [];
+  // Stays a single quiet resume banner for the common one-project case (no
+  // list chrome for someone who's never needed a switcher); upgrades to the
+  // full "Your businesses" list the moment there's actually more than one,
+  // or the New Business action becomes relevant because there's something
+  // on the current one worth branching off from.
+  var showBusinessPanel = hasDraft || list.length > 1;
+
   return (
     <div style={{ padding: '32px', maxWidth: '760px', margin: '0 auto' }}>
       <h1 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 4px' }}>{greeting}.</h1>
       <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 28px' }}>What would you like to do today?</p>
-      {hasDraft && (
-        <button onClick={function () { onCard('analyst'); }} style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
-          textAlign: 'left', padding: '16px 20px', borderRadius: '14px', border: '1px solid var(--border-accent)',
-          background: 'var(--bg-accent)', cursor: 'pointer', marginBottom: '20px',
-        }}>
-          <div>
-            <p style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-accent)', margin: '0 0 3px' }}>Continue: {bizName}</p>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>{statusLabel} · {draftPct}% of fields confirmed</p>
+      {showBusinessPanel && (
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <p style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-muted)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Your businesses</p>
+            {onNewProject && (
+              <button onClick={onNewProject} disabled={switchingProject} style={{
+                fontSize: '12px', fontWeight: '600', color: 'var(--text-accent)', background: 'transparent', border: 'none',
+                cursor: switchingProject ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: '4px', padding: 0,
+              }}>
+                <i className="ti ti-plus" aria-hidden="true" style={{ fontSize: '13px' }} /> New Business
+              </button>
+            )}
           </div>
-          <i className="ti ti-arrow-right" aria-hidden="true" style={{ fontSize: '16px', color: 'var(--text-accent)', flexShrink: 0 }} />
-        </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {list.map(function (p) {
+              var isActive = p.id === projectId;
+              return (
+                <button key={p.id} disabled={switchingProject}
+                  onClick={function () { onCard ? (isActive ? onCard('analyst') : onSwitchProject(p.id)) : null; }}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
+                    textAlign: 'left', padding: '14px 18px', borderRadius: '12px',
+                    border: '1px solid ' + (isActive ? 'var(--border-accent)' : 'var(--border)'),
+                    background: isActive ? 'var(--bg-accent)' : 'var(--surface-2)',
+                    cursor: switchingProject ? 'default' : 'pointer', opacity: switchingProject ? 0.6 : 1,
+                  }}>
+                  <div>
+                    <p style={{ fontSize: '13px', fontWeight: '600', color: isActive ? 'var(--text-accent)' : 'var(--text-primary)', margin: '0 0 3px' }}>
+                      {p.name}{isActive ? ' · Active' : ''}
+                    </p>
+                    <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: 0 }}>
+                      {projectStatusLabel(p.status)}{isActive && hasDraft ? ' · ' + activePct + '% confirmed' : ''} · updated {relativeTime(p.updated_at)}
+                    </p>
+                  </div>
+                  <i className="ti ti-arrow-right" aria-hidden="true" style={{ fontSize: '15px', color: isActive ? 'var(--text-accent)' : 'var(--text-muted)', flexShrink: 0 }} />
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
         {ACTION_CARDS.map(function (c) {
@@ -158,10 +209,10 @@ function ComingNextPanel({ title, note }) {
   );
 }
 
-function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, cardLoading, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange }) {
+function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, cardLoading, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange, projectsList, onSwitchProject, onNewProject, switchingProject }) {
   return (
     <div style={{ width: '65%', flex: 1, height: '100%', overflowY: 'auto', background: 'var(--surface-0)' }}>
-      {convPhase === 'discovery' && <HomeScreen onCard={onCard} loadingKey={cardLoading} report={report} convExtraction={convExtraction} convModel={convModel} />}
+      {convPhase === 'discovery' && <HomeScreen onCard={onCard} loadingKey={cardLoading} report={report} convExtraction={convExtraction} convModel={convModel} projectId={projectId} projectsList={projectsList} onSwitchProject={onSwitchProject} onNewProject={onNewProject} switchingProject={switchingProject} />}
 
       {convPhase === 'valuation' && (
         <ValuationPlatform
@@ -298,52 +349,137 @@ export default function Platform({ user, sessionId, onSignOut }) {
   // as-is purely for instant paint on remount and for the anonymous
   // (logged-out) flow, which is unaffected by any of this.
   var projectIdSt = useState(null), projectId = projectIdSt[0], setProjectId = projectIdSt[1];
+  // Phase 2: the account's full project list (id/name/status/updated_at
+  // only - deliberately lightweight, not each project's full extraction,
+  // so the switcher doesn't fire an N-query fan-out just to render a list).
+  // Empty for an anonymous user, same as projectId.
+  var projectsListSt = useState([]), projectsList = projectsListSt[0], setProjectsList = projectsListSt[1];
+  var switchingProjectSt = useState(false), switchingProject = switchingProjectSt[0], setSwitchingProject = switchingProjectSt[1];
+
+  function refreshProjectsList() {
+    if (!user || !user.id) return Promise.resolve([]);
+    return supabase.from('projects').select('id, name, status, updated_at').eq('user_id', user.id).order('updated_at', { ascending: false })
+      .then(function (res) {
+        var list = res.data || [];
+        setProjectsList(list);
+        return list;
+      })
+      .catch(function () { return []; });
+  }
+
+  // Loads one project's saved state into the right panel and applies
+  // whatever is found - does NOT clear first. On first mount that's
+  // correct as-is (nothing to clear yet beyond the synchronous localStorage
+  // seed, which should only ever be overwritten by a real result, never
+  // blanked out from under it while the fetch is still in flight - blanking
+  // eagerly would flash seed-data -> blank -> real-data on every load, and
+  // would wipe a good seed if the fetch happened to fail). Callers that
+  // switch AWAY from an already-loaded project (switchProject) are
+  // responsible for clearing state themselves first - see there.
+  function loadProjectData(pid) {
+    if (!pid) return Promise.resolve();
+    return Promise.all([
+      // Every conversation row this project has, not just the most
+      // recently touched one. backfill_projects.sql links ALL of an
+      // account's pre-existing session rows to a single project, and
+      // "most recently updated" is not the same as "most complete" - a
+      // later throwaway test session (near-empty extraction) can outrank
+      // the real finished interview purely on timestamp, which is exactly
+      // the "lost data" bug reported after the first backfill run. Fetch
+      // them all, oldest first, and deep-merge - see deepMergeExtraction
+      // above. Going forward (post-Phase-1) persistConversation always
+      // PATCHes the one project-linked row, so this multi-row case should
+      // only ever matter for legacy, pre-backfill history.
+      supabase.from('ai_conversations').select('extraction, model, brief').eq('project_id', pid).order('updated_at', { ascending: true }),
+      supabase.from('financial_model_reports').select('*').eq('project_id', pid).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+    ]).then(function (results) {
+      var convRows = (results[0] && results[0].data) || [];
+      var reportRow = results[1] && results[1].data;
+      var mergedExtraction = convRows.reduce(function (acc, row) { return deepMergeExtraction(acc, row.extraction); }, null);
+      var mergedModel = convRows.reduce(function (acc, row) { return deepMergeExtraction(acc, row.model); }, null);
+      var mergedBrief = convRows.reduce(function (acc, row) { return deepMergeExtraction(acc, row.brief); }, null);
+      if (mergedExtraction) setConvExtraction(mergedExtraction);
+      if (mergedModel) setConvModel(mergedModel);
+      if (mergedBrief) setBrief(mergedBrief);
+      if (reportRow) setReport(reportRow);
+    }).catch(function () {
+      // Best-effort - worst case this project shows blank until the next
+      // successful load; never block the app on this.
+    });
+  }
+
+  // Switches the active project: points projectId/right-panel state at a
+  // different one of the account's projects. Always lands back on Home
+  // (rather than deep-linking into whatever phase the OTHER project last
+  // left off in) - predictable, and matches the resume-banner pattern
+  // already established for the single-project case.
+  function switchProject(pid) {
+    if (pid === projectId) return;
+    setSwitchingProject(true);
+    setProjectId(pid);
+    setSellerForm(null);
+    setSelEngId(null);
+    setConvPhase('discovery');
+    // Clear explicitly before fetching - unlike the initial-mount call to
+    // loadProjectData, this one really does need to blank the PREVIOUS
+    // project's data first, or it stays visible on screen until the new
+    // project's fetch resolves.
+    setConvExtraction({});
+    setConvModel(null);
+    setBrief(null);
+    setReport(null);
+    loadProjectData(pid).then(function () { setSwitchingProject(false); });
+  }
+
+  function createNewProject() {
+    if (!user || !user.id) return;
+    setSwitchingProject(true);
+    supabase.from('projects').insert({ user_id: user.id, name: 'Untitled Business' }).select().single()
+      .then(function (res) {
+        if (!res.data) { setSwitchingProject(false); return; }
+        setProjectId(res.data.id);
+        setSellerForm(null);
+        setSelEngId(null);
+        setConvExtraction({});
+        setConvModel(null);
+        setBrief(null);
+        setReport(null);
+        setConvPhase('discovery');
+        setSwitchingProject(false);
+        refreshProjectsList();
+      })
+      .catch(function () { setSwitchingProject(false); });
+  }
+
+  // Best-effort project.updated_at bump so "most recently touched" sorting
+  // (both the switcher list order and which project loads by default on
+  // next login) actually tracks activity, not just row creation time - see
+  // handleExtraction below. Never awaited, never blocks the UI.
+  function touchProjectActivity(pid) {
+    if (!pid) return;
+    supabase.from('projects').update({ updated_at: new Date().toISOString() }).eq('id', pid).then(function () {}).catch(function () {});
+  }
 
   useEffect(function () {
     var cancelled = false;
     if (!user || !user.id) return undefined; // anonymous - untouched, localStorage-only as before
 
-    supabase.from('projects').select('*').eq('user_id', user.id).order('updated_at', { ascending: false }).limit(1).maybeSingle()
-      .then(function (res) {
+    refreshProjectsList()
+      .then(function (list) {
         if (cancelled) return null;
-        if (res.data) return res.data;
+        if (list.length > 0) return list[0]; // already sorted by updated_at desc
         // First time this account has ever reached the platform - give them
         // a project to attach state to from the very first turn, rather
         // than creating one lazily mid-interview and risking an early turn
         // going unsaved.
-        return supabase.from('projects').insert({ user_id: user.id, name: 'Untitled Business' }).select().single().then(function (r) { return r.data; });
+        return supabase.from('projects').insert({ user_id: user.id, name: 'Untitled Business' }).select().single()
+          .then(function (r) { return r.data; })
+          .then(function (project) { return refreshProjectsList().then(function () { return project; }); });
       })
       .then(function (project) {
         if (cancelled || !project) return;
         setProjectId(project.id);
-        return Promise.all([
-          // Every conversation row this project has, not just the most
-          // recently touched one. backfill_projects.sql links ALL of an
-          // account's pre-existing session rows to a single project, and
-          // "most recently updated" is not the same as "most complete" - a
-          // later throwaway test session (near-empty extraction) can
-          // outrank the real finished interview purely on timestamp,
-          // which is exactly the "lost data" bug reported after the first
-          // backfill run. Fetch them all, oldest first, and deep-merge -
-          // see deepMergeExtraction above.
-          supabase.from('ai_conversations').select('extraction, model, brief').eq('project_id', project.id).order('updated_at', { ascending: true }),
-          supabase.from('financial_model_reports').select('*').eq('project_id', project.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
-        ]).then(function (results) {
-          if (cancelled) return;
-          var convRows = (results[0] && results[0].data) || [];
-          var reportRow = results[1] && results[1].data;
-          var mergedExtraction = convRows.reduce(function (acc, row) { return deepMergeExtraction(acc, row.extraction); }, null);
-          var mergedModel = convRows.reduce(function (acc, row) { return deepMergeExtraction(acc, row.model); }, null);
-          var mergedBrief = convRows.reduce(function (acc, row) { return deepMergeExtraction(acc, row.brief); }, null);
-          // Supabase is authoritative once it resolves - overwrite whatever
-          // the localStorage seed painted, don't merge with it (a stale
-          // local copy should never win over the account's real saved
-          // state).
-          if (mergedExtraction) setConvExtraction(mergedExtraction);
-          if (mergedModel) setConvModel(mergedModel);
-          if (mergedBrief) setBrief(mergedBrief);
-          if (reportRow) setReport(reportRow);
-        });
+        return loadProjectData(project.id);
       })
       .catch(function () {
         // Best-effort - if this fails (offline, RLS misconfigured, etc.)
@@ -449,6 +585,22 @@ export default function Platform({ user, sessionId, onSignOut }) {
 
   function handleExtraction(data) {
     setConvExtraction(data);
+    touchProjectActivity(projectId);
+    // Opportunistic rename off the AI's own extraction, once it knows one -
+    // without this every project in the switcher would read "Untitled
+    // Business" forever, which defeats the point of a list. Only fires
+    // while the project is still on the default name, so it never
+    // clobbers something the account holder set deliberately (renaming is
+    // a later, explicit-UI concern, not built here).
+    var bp = data && data.businessProfile;
+    var derivedName = bp && (bp.name || bp.businessType);
+    if (derivedName && projectId) {
+      var current = projectsList.filter(function (p) { return p.id === projectId; })[0];
+      if (!current || current.name === 'Untitled Business') {
+        supabase.from('projects').update({ name: derivedName }).eq('id', projectId)
+          .then(function () { refreshProjectsList(); }).catch(function () {});
+      }
+    }
   }
 
   function handleModelComplete(model) {
@@ -459,6 +611,12 @@ export default function Platform({ user, sessionId, onSignOut }) {
     // platform-indicative defaults baked into buildV3FormFromModel if this
     // fails or the user has no profile row yet.
     loadSellerFormForProfile(model, computed, setSellerForm);
+    // Surfaces in the project switcher (see HomeScreen) without it having
+    // to fetch every project's full extraction just to show a status badge.
+    if (projectId) {
+      supabase.from('projects').update({ status: 'model_complete', updated_at: new Date().toISOString() }).eq('id', projectId)
+        .then(function () {}).catch(function () {});
+    }
   }
 
   function handleBriefComplete(briefData) {
@@ -563,6 +721,13 @@ export default function Platform({ user, sessionId, onSignOut }) {
       )}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <ConversationEngine
+          // Forces a clean remount on project switch - the chat log, its
+          // restore effect, exchangeCount, pending-action state etc. all
+          // reset from scratch rather than needing every internal piece of
+          // ConversationEngine's state hand-audited for cross-project
+          // leakage. Falls back to sessionId for the anonymous (no
+          // project) flow, unaffected by any of this.
+          key={projectId || sessionId}
           user={user}
           sessionId={sessionId}
           projectId={projectId}
@@ -599,6 +764,10 @@ export default function Platform({ user, sessionId, onSignOut }) {
           onBrowseMatched={function () { setConvPhase('listings'); }}
           onAskAiAboutListing={handleAskAiAboutListing}
           onSellerFormChange={setSellerForm}
+          projectsList={projectsList}
+          onSwitchProject={switchProject}
+          onNewProject={createNewProject}
+          switchingProject={switchingProject}
         />
       </div>
     </div>
