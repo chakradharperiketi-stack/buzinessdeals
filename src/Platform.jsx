@@ -817,6 +817,22 @@ export default function Platform({ user, sessionId, onSignOut }) {
     // localStorage from before that source fix existed.
     if (nextPhase === 'valuation' && !(sellerForm && sellerForm.engagementType)) {
       setCardLoading('valuation');
+      // NOTE: this "only rebuild if sellerForm looks empty" guard is
+      // deliberately conservative here, for the ConversationEngine-driven
+      // caller (a mid-chat "set_next_phase" nudge shouldn't blow away a
+      // valuation the user is already mid-edit on). The "Use this model for
+      // valuation" button in FinancialModelPanel does NOT go through this
+      // function any more - see handleProceedFromModel below, which always
+      // rebuilds. Splitting these apart is what fixed a real bug: a
+      // sellerForm that already has engagementType set (so this guard would
+      // leave it alone) can still have been built from stale/empty data -
+      // e.g. handleCard('valuation')'s deliberate model=null seed, from an
+      // earlier direct "Valuation Report" click before this project's AI
+      // interview ever ran. Routing the button through this shared,
+      // cache-trusting guard is exactly how a confirmed, non-zero completed
+      // model (revenue.annualTotal for real, verified via the Financial
+      // Model screen) still produced an all-zero valuation form: the guard
+      // saw an already-"complete" stale sellerForm and never rebuilt it.
       loadSellerFormForProfile(convModel, convModel ? computeModel(convModel) : null, function (form) {
         setSellerForm(form);
         setConvPhase(nextPhase);
@@ -825,6 +841,22 @@ export default function Platform({ user, sessionId, onSignOut }) {
       return;
     }
     setConvPhase(nextPhase);
+  }
+
+  // The FinancialModelPanel "Use this model for valuation ->" button always
+  // means exactly what it says: build the valuation form from the model
+  // that's on screen right now. Unlike handlePhaseChange's other caller (a
+  // mid-chat nudge, where reusing an in-progress sellerForm is the safer
+  // default), there's no ambiguity to preserve here - so this never trusts
+  // whatever sellerForm already happens to be in state, it always rebuilds
+  // fresh from the current convModel.
+  function handleProceedFromModel() {
+    setCardLoading('valuation');
+    loadSellerFormForProfile(convModel, convModel ? computeModel(convModel) : null, function (form) {
+      setSellerForm(form);
+      setConvPhase('valuation');
+      setCardLoading(null);
+    });
   }
 
   function handleAction(actionType) {
@@ -937,16 +969,19 @@ export default function Platform({ user, sessionId, onSignOut }) {
           onCard={handleCard}
           cardLoading={cardLoading}
           onHomeFromValuation={goHome}
-          // Must go through handlePhaseChange, not a bare setConvPhase - that
-          // is the only function that pre-builds sellerForm (from the just-
-          // completed convModel) before landing on 'valuation'. A direct
-          // setConvPhase('valuation') here was the exact "fourth entry
-          // point" the comment above handlePhaseChange warns about: it skips
-          // the pre-fetch, so ValuationPlatform mounts with a null
-          // initialForm and falls back to the legacy "who is performing
-          // this valuation" picker - the screen this button is meant to
-          // skip past, not land on.
-          onProceedToValuation={function () { handlePhaseChange('valuation'); }}
+          // Goes through handleProceedFromModel, NOT handlePhaseChange - this
+          // button always means "build the valuation from the model that's
+          // on screen right now", so it must always rebuild sellerForm, not
+          // defer to handlePhaseChange's cache-trusting guard. That guard
+          // (correct for a mid-chat nudge, where preserving an in-progress
+          // edit is the right default) was, until this fix, also the path
+          // this button used - so a stale-but-"complete-shaped" sellerForm
+          // already sitting in state (e.g. from a much earlier direct
+          // "Valuation Report" click before this project's AI interview had
+          // ever run) would satisfy the guard and never get rebuilt, even
+          // though the just-completed model had real, confirmed numbers.
+          // See handleProceedFromModel's own comment for the full story.
+          onProceedToValuation={handleProceedFromModel}
           onBrowseMatched={function () { setConvPhase('listings'); }}
           onAskAiAboutListing={handleAskAiAboutListing}
           onSellerFormChange={setSellerForm}
