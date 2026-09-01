@@ -656,7 +656,7 @@ export default function LandingPage({ sessionId }) {
           <span style={{
             background: 'linear-gradient(90deg, #93c5fd, #c4b5fd)',
             WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-          }}>Indian Businesses</span>
+          }}>Indian{' '}Businesses</span>
         </h1>
         <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.6)', textAlign: 'center', margin: '0 0 32px', maxWidth: '560px' }}>
           Talk to our AI advisor — get guidance on buying, selling, investing or valuing a business.
