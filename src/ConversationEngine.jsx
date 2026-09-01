@@ -42,6 +42,23 @@ function normaliseMessage(m) {
   return { role: m.role === 'user' ? 'user' : 'assistant', text: m.text != null ? m.text : (m.content || '') };
 }
 
+// Defense-in-depth backstop, not a substitute for the "no markdown in chat"
+// prompt instruction in ai-search-v2 - that instruction is not 100% reliable
+// (confirmed: it was live in production and the model still emitted literal
+// **bold** in a user's test). The chat panel has no markdown renderer, so a
+// leaked marker shows up as a literal asterisk/hash cluttering the message
+// no matter how well-worded the prompt is. Strip on the rendering side too,
+// so a prompt-compliance slip can never reach the screen. Assistant replies
+// only - never touches what the user actually typed.
+function cleanAssistantText(text) {
+  if (!text) return text;
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1')   // **bold** -> bold (paired)
+    .replace(/\*\*/g, '')              // any stray unpaired **
+    .replace(/^#{1,6}\s+/gm, '')       // # / ## headers at line start
+    .replace(/^\*\s+/gm, '- ');        // "* item" bullets -> "- item"
+}
+
 function briefToContext(brief) {
   if (!brief) return '';
   if (brief.summary) return brief.summary;
@@ -364,7 +381,7 @@ export default function ConversationEngine({
                   maxWidth: '88%', padding: '10px 14px', borderRadius: isUser ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
                   fontSize: '13px', lineHeight: '1.55', whiteSpace: 'pre-wrap',
                   background: isUser ? '#2563eb' : 'rgba(255,255,255,0.08)', color: '#fff',
-                }}>{m.text}</div>
+                }}>{isUser ? m.text : cleanAssistantText(m.text)}</div>
               </div>
             );
           })
