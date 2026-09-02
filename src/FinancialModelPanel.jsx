@@ -306,7 +306,7 @@ function SectionCard({ title, rows }) {
   );
 }
 
-export default function FinancialModelPanel({ extraction, model, onProceed, sessionId, userId, projectId, report, onReportGenerated }) {
+export default function FinancialModelPanel({ extraction, model, onProceed, sessionId, userId, userEmail, projectId, report, onReportGenerated }) {
   var data = model || extraction;
   var sections = buildSections(data || {});
   var allRows = sections.reduce(function (acc, s) { return acc.concat(s.rows); }, []);
@@ -370,7 +370,7 @@ export default function FinancialModelPanel({ extraction, model, onProceed, sess
         <p style={{ fontSize: '12px', color: statusColor, fontWeight: '600', margin: 0 }}>{statusLabel} · {pct}% of fields confirmed</p>
       </div>
 
-      {report && <FinancialReportPreview report={report} panelCompletionPct={pct} onReportUpdated={onReportGenerated} />}
+      {report && <FinancialReportPreview report={report} panelCompletionPct={pct} onReportUpdated={onReportGenerated} userId={userId} userEmail={userEmail} />}
 
       {isComplete && (
         <div style={{ padding: '16px', background: 'var(--bg-success)', border: '1px solid var(--border-success)', borderRadius: '12px', textAlign: 'center', marginTop: '4px' }}>
