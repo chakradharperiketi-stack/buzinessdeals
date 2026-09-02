@@ -361,7 +361,7 @@ export default function FinancialModelPanel({ extraction, model, onProceed, sess
   var statusColor = report ? 'var(--text-success)' : isComplete ? 'var(--text-accent)' : 'var(--text-muted)';
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: '640px', margin: '0 auto' }}>
+    <div style={{ padding: '28px 40px', maxWidth: '860px', margin: '0 auto' }}>
       {/* Leads with status, not a checklist - a returning user with a
           finished report should see "here's your report", not a wall of
           "waiting..." rows for fields the report has already used. */}
