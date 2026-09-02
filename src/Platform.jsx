@@ -733,14 +733,22 @@ export default function Platform({ user, sessionId, onSignOut }) {
       return;
     }
     if (cardKey === 'valuation') {
-      // Starting a fresh valuation from the home screen (no prior AI
-      // interview) - don't carry over a form built for a different
-      // engagement, and don't switch panels until a profile-based form is
-      // ready, so ValuationPlatform never mounts with a null initialForm
-      // (which would show the legacy engagementType picker screen).
+      // Reuse this project's completed AI Financial Model if one exists -
+      // exactly what handleProceedFromModel does for the "Use this model
+      // for valuation ->" button. This card used to ALWAYS seed a blank
+      // valuation (model=null), regardless of whether a completed,
+      // confirmed model already existed for the active project - which is
+      // how real numbers, built moments earlier, could look like they
+      // "vanished" the instant the user went Home and reopened valuation
+      // from this card instead of that button. There's no reason those two
+      // paths should behave differently when they land on the same
+      // project: if a model exists, use it; only fall back to a blank form
+      // (model=null) when there genuinely isn't one yet, so
+      // ValuationPlatform still never mounts with a null initialForm (which
+      // would show the legacy engagementType picker screen).
       setSelEngId(null);
       setCardLoading('valuation');
-      loadSellerFormForProfile(null, null, function (form) {
+      loadSellerFormForProfile(convModel, convModel ? computeModel(convModel) : null, function (form) {
         setSellerForm(form);
         setConvPhase('valuation');
         setCardLoading(null);
