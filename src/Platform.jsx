@@ -42,25 +42,33 @@ function NavBar({ user, isAdmin, onHome, onGoListings, onSignOut }) {
         <span style={{ fontSize: '13px', fontWeight: '600', color: '#fff' }}>buzinessdeals.com</span>
       </button>
 
-      <button onClick={onGoListings} style={{
-        background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff',
-        fontSize: '12px', padding: '6px 14px', borderRadius: '7px', cursor: 'pointer',
-      }}>Browse listings</button>
+      {/* "Browse listings" used to be a third flex child alongside the logo
+          and the avatar, so justify-content:space-between put it dead
+          center of the whole bar - visually stranded, not associated with
+          either side. Grouping it with the avatar under one right-aligned
+          flex container puts space-between back to its intended two groups
+          (logo | everything else), landing this button naturally beside the
+          profile menu instead of floating in the middle of the page. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <button onClick={onGoListings} style={{
+          background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff',
+          fontSize: '12px', padding: '6px 14px', borderRadius: '7px', cursor: 'pointer',
+        }}>Browse listings</button>
 
-      <div style={{ position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {isAdmin && (
-            <span style={{
-              fontSize: '10px', fontWeight: '600', color: '#92400e', background: '#fcd34d',
-              padding: '2px 8px', borderRadius: '999px',
-            }}>Admin</span>
-          )}
-          <button onClick={function () { setMenuOpen(!menuOpen); }} style={{
-            width: '28px', height: '28px', borderRadius: '50%', background: '#2563eb', color: '#fff',
-            border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '600',
-          }}>{initial}</button>
-        </div>
-        {menuOpen && (
+        <div style={{ position: 'relative' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {isAdmin && (
+              <span style={{
+                fontSize: '10px', fontWeight: '600', color: '#92400e', background: '#fcd34d',
+                padding: '2px 8px', borderRadius: '999px',
+              }}>Admin</span>
+            )}
+            <button onClick={function () { setMenuOpen(!menuOpen); }} style={{
+              width: '28px', height: '28px', borderRadius: '50%', background: '#2563eb', color: '#fff',
+              border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '600',
+            }}>{initial}</button>
+          </div>
+          {menuOpen && (
           <div style={{
             position: 'absolute', right: 0, top: '38px', background: '#fff', borderRadius: '10px',
             boxShadow: '0 12px 32px rgba(0,0,0,0.2)', minWidth: '200px', overflow: 'hidden', border: '1px solid var(--border)',
@@ -85,6 +93,7 @@ function NavBar({ user, isAdmin, onHome, onGoListings, onSignOut }) {
             }}>Sign out</button>
           </div>
         )}
+        </div>
       </div>
     </div>
   );
@@ -328,6 +337,13 @@ function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngI
           initialForm={sellerForm}
           onHome={onHomeFromValuation}
           onFormChange={onSellerFormChange}
+          // Only shown when this project has a completed AI Financial Model
+          // to go back to - a direct/blank valuation (no convModel) has
+          // nowhere to "go back" to, so Home is the only exit in that case.
+          // Reuses the plain onCard('analyst') phase flip (no re-fetch, no
+          // reset of convModel/convExtraction), so the model already on
+          // screen just reappears exactly as it was left.
+          onBackToModel={convModel ? function () { onCard('analyst'); } : null}
         />
       )}
 
