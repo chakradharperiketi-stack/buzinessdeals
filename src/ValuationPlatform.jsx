@@ -2075,8 +2075,8 @@ Return ONLY valid JSON (no markdown, no preamble):
 
   const visibleSections=SECTIONS.filter(s=>!(s.id==="valuer"&&form.engagementType==="internal"));
 
-  return <div style={{maxWidth:"800px",margin:"0 auto",fontFamily:"var(--font-sans)",height:"calc(100vh - 48px)",overflowY:"auto",padding:"0 24px 24px"}}>
-    <div style={{position:"sticky",top:0,zIndex:10,background:"#1a2332",padding:"14px 16px",margin:"-24px -24px 14px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
+  return <div style={{maxWidth:"1000px",margin:"0 auto",fontFamily:"var(--font-sans)",height:"calc(100vh - 48px)",overflowY:"auto",padding:"0 32px 24px"}}>
+    <div style={{position:"sticky",top:0,zIndex:10,background:"#1a2332",padding:"14px 16px",margin:"-24px -32px 14px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"8px"}}>
         <div style={{flex:1}}>
           <h1 style={{fontSize:"17px",fontWeight:"500",margin:"0 0 2px",color:"#ffffff"}}>Business Valuation Platform</h1>
