@@ -286,7 +286,7 @@ const initForm=()=>{
     rmMultiple:"4",rmYear:"3",rmBasis:"revenue",
     capRate:"15",
     navBookValue:"",navRevaluation:"",navSurplusAssets:"",navContingentLiab:"",
-    raiseAmount:"",raiseTerms:"Equity stake",
+    raiseAmount:"",raiseTerms:"Equity stake",isFundraising:false,
   };
 };
 
@@ -491,7 +491,22 @@ function S1_Company({f,setF,onNext}){
       <F label="Valuation date" value={f.valuationDate} onChange={v=>setF({...f,valuationDate:v})} type="date"/>
       <Sel label="Purpose of valuation" value={f.purpose} onChange={v=>setF({...f,purpose:v})} options={PURPOSES}/>
     </G>
-    {(f.purpose||"").toLowerCase().match(/fundrais|capital|loan|equity|series|angel|seed/)&&(
+    {/* Explicit opt-in, not just a guess from the Purpose text - the
+        AI-model -> valuation handoff (buildV3FormFromModel) always sets
+        purpose to "Business Sale / Investment Advisory", which never
+        matches the fundraising-keyword regex below, so that flow could
+        never reach the post-money calculator no matter what the user
+        actually wants it for. This checkbox works regardless of Purpose;
+        the regex match below still auto-reveals the fields too, for
+        anyone who picked a fundraising-worded Purpose the old way. */}
+    <label style={{display:"flex",alignItems:"center",gap:"8px",marginTop:"14px",cursor:"pointer"}}>
+      <input type="checkbox" checked={!!f.isFundraising}
+        onChange={e=>setF({...f,isFundraising:e.target.checked})}/>
+      <span style={{fontSize:"12px",color:"var(--color-text-secondary)"}}>
+        This is a fundraising valuation - show the post-money / dilution calculator
+      </span>
+    </label>
+    {(f.isFundraising||(f.purpose||"").toLowerCase().match(/fundrais|capital|loan|equity|series|angel|seed/)||(f.raiseAmount&&parseFloat(f.raiseAmount)>0))&&(
       <div style={{marginTop:"16px",padding:"14px 16px",background:"#fef3c7",
         border:"1px solid #fcd34d",borderRadius:"8px"}}>
         <p style={{fontSize:"11px",fontWeight:"500",color:"#92400e",margin:"0 0 12px",
