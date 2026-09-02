@@ -24,7 +24,7 @@ var ACTION_CARDS = [
   { key: 'valuation', icon: 'ti-chart-line', color: '#2563eb', title: 'Valuation Report', desc: 'A full DCF valuation using Damodaran India data - from Rs. 2,000.' },
 ];
 
-function NavBar({ user, isAdmin, onHome, onGoListings, onSignOut }) {
+function NavBar({ user, isAdmin, onHome, onGoListings, onGoBusinesses, onSignOut }) {
   var menuSt = useState(false), menuOpen = menuSt[0], setMenuOpen = menuSt[1];
   var initial = (user && user.email ? user.email[0] : '?').toUpperCase();
 
@@ -71,26 +71,66 @@ function NavBar({ user, isAdmin, onHome, onGoListings, onSignOut }) {
           {menuOpen && (
           <div style={{
             position: 'absolute', right: 0, top: '38px', background: '#fff', borderRadius: '10px',
-            boxShadow: '0 12px 32px rgba(0,0,0,0.2)', minWidth: '200px', overflow: 'hidden', border: '1px solid var(--border)',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.2)', minWidth: '230px', overflow: 'hidden', border: '1px solid var(--border)',
           }}>
+            <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+              <p style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {(user && user.email) || 'Account'}
+              </p>
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0 }}>{isAdmin ? 'Admin' : 'Member'}</p>
+            </div>
+            {/* Real, working destinations - each backed by data and a UI that
+                already exists (Home = discovery screen, My Businesses = the
+                project list on that same screen, forced open). */}
             {[
-              { label: 'Home', action: onHome },
-              { label: 'My Businesses', action: onHome },
-              { label: 'My Engagements', action: onHome },
-              { label: 'My Interests', action: onHome },
-              { label: 'Profile and Settings', action: onHome },
-            ].concat(isAdmin ? [{ label: 'Admin Portal', action: onHome }] : []).map(function (item) {
+              { label: 'Home', icon: 'ti-home', action: onHome },
+              { label: 'My Businesses', icon: 'ti-building', action: onGoBusinesses },
+            ].map(function (item) {
               return (
                 <button key={item.label} onClick={function () { setMenuOpen(false); item.action(); }} style={{
-                  display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'transparent',
-                  border: 'none', borderBottom: '1px solid var(--border)', fontSize: '13px', color: 'var(--text-primary)', cursor: 'pointer',
-                }}>{item.label}</button>
+                  display: 'flex', alignItems: 'center', gap: '10px', width: '100%', textAlign: 'left', padding: '10px 14px',
+                  background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', fontSize: '13px',
+                  color: 'var(--text-primary)', cursor: 'pointer',
+                }}>
+                  <i className={'ti ' + item.icon} aria-hidden="true" style={{ fontSize: '15px', color: 'var(--text-muted)' }} />
+                  {item.label}
+                </button>
+              );
+            })}
+            {/* Not built yet - no engagements list, interests list, or
+                profile/admin screen exists anywhere in the app to route to.
+                These used to silently call onHome() instead, which looked
+                identical to the button doing nothing. Shown disabled with a
+                "Soon" tag instead, so the gap is honest rather than hidden. */}
+            {[
+              { label: 'My Engagements', icon: 'ti-clipboard-list' },
+              { label: 'My Interests', icon: 'ti-heart' },
+              { label: 'Profile & Settings', icon: 'ti-user-cog' },
+            ].concat(isAdmin ? [{ label: 'Admin Portal', icon: 'ti-shield-lock' }] : []).map(function (item) {
+              return (
+                <div key={item.label} title="Coming soon" style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', width: '100%',
+                  padding: '10px 14px', borderBottom: '1px solid var(--border)', fontSize: '13px', color: 'var(--text-muted)',
+                  cursor: 'default', opacity: 0.65,
+                }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <i className={'ti ' + item.icon} aria-hidden="true" style={{ fontSize: '15px', color: 'var(--text-muted)' }} />
+                    {item.label}
+                  </span>
+                  <span style={{
+                    fontSize: '9px', fontWeight: '700', color: 'var(--text-muted)', background: 'var(--surface-2)',
+                    padding: '2px 6px', borderRadius: '999px', textTransform: 'uppercase', letterSpacing: '0.03em',
+                  }}>Soon</span>
+                </div>
               );
             })}
             <button onClick={function () { setMenuOpen(false); onSignOut(); }} style={{
-              display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'transparent',
-              border: 'none', fontSize: '13px', color: 'var(--text-danger)', cursor: 'pointer',
-            }}>Sign out</button>
+              display: 'flex', alignItems: 'center', gap: '10px', width: '100%', textAlign: 'left', padding: '10px 14px',
+              background: 'transparent', border: 'none', fontSize: '13px', color: 'var(--text-danger)', cursor: 'pointer',
+            }}>
+              <i className="ti ti-logout" aria-hidden="true" style={{ fontSize: '15px' }} />
+              Sign out
+            </button>
           </div>
         )}
         </div>
@@ -190,7 +230,7 @@ function BusinessRow({ p, isActive, hasDraft, activePct, switchingProject, onOpe
   );
 }
 
-function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel, projectId, projectsList, onSwitchProject, onNewProject, onArchiveProject, onUnarchiveProject, onRenameProject, onDeleteProject, autoEditProjectId, onAutoEditConsumed, switchingProject }) {
+function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel, projectId, projectsList, onSwitchProject, onNewProject, onArchiveProject, onUnarchiveProject, onRenameProject, onDeleteProject, autoEditProjectId, onAutoEditConsumed, switchingProject, forceBusinessPanel }) {
   var hour = new Date().getHours();
   var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   var showArchivedSt = useState(false), showArchived = showArchivedSt[0], setShowArchived = showArchivedSt[1];
@@ -220,7 +260,7 @@ function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel, pro
   // Business action worth surfacing (something exists on the current one to
   // branch off from). Capped height below, not unbounded growth - the
   // panel's footprint stays fixed no matter how many businesses accumulate.
-  var showBusinessPanel = hasDraft || liveProjects.length > 1;
+  var showBusinessPanel = hasDraft || liveProjects.length > 1 || !!forceBusinessPanel;
 
   return (
     <div style={{ padding: '32px', maxWidth: '760px', margin: '0 auto' }}>
@@ -325,10 +365,10 @@ function ComingNextPanel({ title, note }) {
   );
 }
 
-function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, cardLoading, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange, projectsList, onSwitchProject, onNewProject, onArchiveProject, onUnarchiveProject, onRenameProject, onDeleteProject, autoEditProjectId, onAutoEditConsumed, switchingProject }) {
+function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, cardLoading, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange, projectsList, onSwitchProject, onNewProject, onArchiveProject, onUnarchiveProject, onRenameProject, onDeleteProject, autoEditProjectId, onAutoEditConsumed, switchingProject, forceBusinessPanel }) {
   return (
     <div style={{ width: '65%', flex: 1, height: '100%', overflowY: 'auto', background: 'var(--surface-0)' }}>
-      {convPhase === 'discovery' && <HomeScreen onCard={onCard} loadingKey={cardLoading} report={report} convExtraction={convExtraction} convModel={convModel} projectId={projectId} projectsList={projectsList} onSwitchProject={onSwitchProject} onNewProject={onNewProject} onArchiveProject={onArchiveProject} onUnarchiveProject={onUnarchiveProject} onRenameProject={onRenameProject} onDeleteProject={onDeleteProject} autoEditProjectId={autoEditProjectId} onAutoEditConsumed={onAutoEditConsumed} switchingProject={switchingProject} />}
+      {convPhase === 'discovery' && <HomeScreen onCard={onCard} loadingKey={cardLoading} report={report} convExtraction={convExtraction} convModel={convModel} projectId={projectId} projectsList={projectsList} onSwitchProject={onSwitchProject} onNewProject={onNewProject} onArchiveProject={onArchiveProject} onUnarchiveProject={onUnarchiveProject} onRenameProject={onRenameProject} onDeleteProject={onDeleteProject} autoEditProjectId={autoEditProjectId} onAutoEditConsumed={onAutoEditConsumed} switchingProject={switchingProject} forceBusinessPanel={forceBusinessPanel} />}
 
       {convPhase === 'valuation' && (
         <ValuationPlatform
@@ -482,6 +522,14 @@ export default function Platform({ user, sessionId, onSignOut }) {
   // HomeScreen to auto-open that project's rename field, then cleared back
   // to null via onAutoEditConsumed - see HomeScreen's effect.
   var autoEditProjectIdSt = useState(null), autoEditProjectId = autoEditProjectIdSt[0], setAutoEditProjectId = autoEditProjectIdSt[1];
+  // "My Businesses" nav entry - HomeScreen's businesses panel already has
+  // real data and a real UI (list, rename, archive, switch), it just stays
+  // collapsed to a single quiet row for the common one-project/no-draft
+  // case (see HomeScreen's showBusinessPanel comment). This flag forces it
+  // open once the user has explicitly asked to see it via the nav menu,
+  // instead of that menu item silently doing nothing distinguishable from
+  // plain Home for that common case.
+  var forceBusinessPanelSt = useState(false), forceBusinessPanel = forceBusinessPanelSt[0], setForceBusinessPanel = forceBusinessPanelSt[1];
 
   function refreshProjectsList() {
     if (!user || !user.id) return Promise.resolve([]);
@@ -700,6 +748,11 @@ export default function Platform({ user, sessionId, onSignOut }) {
   var isAdmin = !!(user && user.email && ADMIN_EMAILS.indexOf(user.email.toLowerCase()) !== -1);
 
   function goHome() {
+    setConvPhase('discovery');
+  }
+
+  function goBusinesses() {
+    setForceBusinessPanel(true);
     setConvPhase('discovery');
   }
 
@@ -923,7 +976,7 @@ export default function Platform({ user, sessionId, onSignOut }) {
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <NavBar user={user} isAdmin={isAdmin} onHome={goHome} onGoListings={function () { setConvPhase('listings'); }} onSignOut={onSignOut} />
+      <NavBar user={user} isAdmin={isAdmin} onHome={goHome} onGoBusinesses={goBusinesses} onGoListings={function () { setConvPhase('listings'); }} onSignOut={onSignOut} />
       {directListingUpsell && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
@@ -1009,6 +1062,7 @@ export default function Platform({ user, sessionId, onSignOut }) {
           onBrowseMatched={function () { setConvPhase('listings'); }}
           onAskAiAboutListing={handleAskAiAboutListing}
           onSellerFormChange={setSellerForm}
+          forceBusinessPanel={forceBusinessPanel}
           projectsList={projectsList}
           onSwitchProject={switchProject}
           onNewProject={createNewProject}
