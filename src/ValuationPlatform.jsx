@@ -2076,30 +2076,35 @@ Return ONLY valid JSON (no markdown, no preamble):
   const visibleSections=SECTIONS.filter(s=>!(s.id==="valuer"&&form.engagementType==="internal"));
 
   return <div style={{maxWidth:"1000px",margin:"0 auto",fontFamily:"var(--font-sans)",height:"calc(100vh - 48px)",overflowY:"auto",padding:"0 32px 24px"}}>
-    <div style={{position:"sticky",top:0,zIndex:10,background:"#1a2332",padding:"14px 16px",margin:"-24px -32px 14px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
+    <div style={{position:"sticky",top:0,zIndex:10,background:"var(--color-background-primary)",padding:"14px 16px",margin:"-24px -32px 14px",borderBottom:"2px solid #2563eb",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"8px"}}>
         <div style={{flex:1}}>
-          <h1 style={{fontSize:"17px",fontWeight:"500",margin:"0 0 2px",color:"#ffffff"}}>Business Valuation Platform</h1>
-          <p style={{fontSize:"12px",color:"rgba(255,255,255,0.7)",margin:0}}>
-              {form.companyName?<strong style={{color:"#ffffff"}}>{form.companyName}</strong>:"No company"} | {form.sector.split(" ")[0]} | WACC {wacc.toFixed(2)}% | {form.forecastPeriod}Y | {u}
+          <h1 style={{fontSize:"18px",fontWeight:"600",margin:"0 0 2px",color:"var(--color-text-primary)"}}>Business Valuation Platform</h1>
+          <p style={{fontSize:"12px",color:"var(--color-text-secondary)",margin:0}}>
+              {form.companyName?<strong style={{color:"var(--color-text-primary)"}}>{form.companyName}</strong>:"No company"} | {form.sector.split(" ")[0]} | WACC {wacc.toFixed(2)}% | {form.forecastPeriod}Y | {u}
             </p>
         </div>
         <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
           {hasRev&&<>
-            {[["EV",Math.round(dcf.ev/mult)],["Equity",Math.round(dcf.eqVal/mult)]].map(([l,v])=><div key={l} style={{padding:"5px 10px",background:"rgba(255,255,255,0.08)",borderRadius:"6px",textAlign:"center"}}>
-              <p style={{fontSize:"10px",color:"rgba(255,255,255,0.5)",margin:"0 0 1px"}}>{l} ({u})</p>
-              <p style={{fontSize:"13px",fontWeight:"500",margin:0,color:"#ffffff"}}>{new Intl.NumberFormat("en-IN").format(v)}</p>
+            {[["EV",Math.round(dcf.ev/mult)],["Equity",Math.round(dcf.eqVal/mult)]].map(([l,v])=><div key={l} style={{padding:"5px 10px",background:"var(--color-background-secondary)",borderRadius:"6px",textAlign:"center"}}>
+              <p style={{fontSize:"10px",color:"var(--color-text-tertiary)",margin:"0 0 1px"}}>{l} ({u})</p>
+              <p style={{fontSize:"13px",fontWeight:"600",margin:0,color:"var(--color-text-primary)"}}>{new Intl.NumberFormat("en-IN").format(v)}</p>
             </div>)}
-            <div style={{padding:"5px 10px",background:"rgba(37,99,235,0.25)",borderRadius:"6px",textAlign:"center"}}>
-              <p style={{fontSize:"10px",color:"rgba(255,255,255,0.7)",margin:"0 0 1px"}}>Per share</p>
-              <p style={{fontSize:"13px",fontWeight:"500",margin:0,color:"#93c5fd"}}>INR {new Intl.NumberFormat("en-IN",{minimumFractionDigits:2}).format(dcf.vps)}</p>
+            <div style={{padding:"5px 10px",background:"rgba(37,99,235,0.1)",borderRadius:"6px",textAlign:"center"}}>
+              <p style={{fontSize:"10px",color:"#2563eb",margin:"0 0 1px"}}>Per share</p>
+              <p style={{fontSize:"13px",fontWeight:"600",margin:0,color:"#2563eb"}}>INR {new Intl.NumberFormat("en-IN",{minimumFractionDigits:2}).format(dcf.vps)}</p>
             </div>
           </>}
-          {lastSaved&&<span style={{fontSize:"10px",color:"rgba(255,255,255,0.5)"}}>Saved {lastSaved}</span>}
+          {lastSaved&&<span style={{fontSize:"10px",color:"var(--color-text-tertiary)"}}>Saved {lastSaved}</span>}
+          {props.onBackToModel&&<button onClick={props.onBackToModel} title="Back to financial model"
+            style={{padding:"7px 12px",background:"transparent",border:"1px solid var(--color-border-secondary)",borderRadius:"6px",cursor:"pointer",display:"flex",alignItems:"center",gap:"5px"}}>
+            <i className="ti ti-arrow-left" aria-hidden="true" style={{fontSize:"14px",color:"var(--color-text-primary)"}}/>
+            <span style={{fontSize:"12px",color:"var(--color-text-primary)"}}>Back to Model</span>
+          </button>}
           <button onClick={function(){if(props.onHome){props.onHome();}else{setForm({...form,engagementType:null});}}} title="Back to home"
-            style={{padding:"7px 12px",background:"transparent",border:"1px solid rgba(255,255,255,0.2)",borderRadius:"6px",cursor:"pointer",display:"flex",alignItems:"center",gap:"5px"}}>
-            <i className="ti ti-home" aria-hidden="true" style={{fontSize:"14px",color:"#ffffff"}}/>
-            <span style={{fontSize:"12px",color:"#ffffff"}}>Home</span>
+            style={{padding:"7px 12px",background:"transparent",border:"1px solid var(--color-border-secondary)",borderRadius:"6px",cursor:"pointer",display:"flex",alignItems:"center",gap:"5px"}}>
+            <i className="ti ti-home" aria-hidden="true" style={{fontSize:"14px",color:"var(--color-text-primary)"}}/>
+            <span style={{fontSize:"12px",color:"var(--color-text-primary)"}}>Home</span>
           </button>
         </div>
       </div>
