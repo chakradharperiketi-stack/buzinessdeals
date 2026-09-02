@@ -374,6 +374,7 @@ function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngI
         <ValuationPlatform
           user={user}
           engagementId={selEngId}
+          projectId={projectId}
           initialForm={sellerForm}
           onHome={onHomeFromValuation}
           onFormChange={onSellerFormChange}
@@ -394,6 +395,7 @@ function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngI
           onProceed={onProceedToValuation}
           sessionId={sessionId}
           userId={user ? user.id : null}
+          userEmail={user ? user.email : null}
           projectId={projectId}
           report={report}
           onReportGenerated={onReportGenerated}
