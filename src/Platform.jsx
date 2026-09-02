@@ -4,6 +4,7 @@ import ConversationEngine from './ConversationEngine';
 import FinancialModelPanel, { computeCompletionPct } from './FinancialModelPanel';
 import AcquisitionBriefPanel from './AcquisitionBriefPanel';
 import BuyerListingsPanel from './BuyerListingsPanel';
+import AdminPortal from './AdminPortal';
 import { computeModel } from './lib/financialModel';
 import { buildV3FormFromModel } from './lib/v3FormMapper';
 import { supabase } from './supabase';
@@ -24,7 +25,7 @@ var ACTION_CARDS = [
   { key: 'valuation', icon: 'ti-chart-line', color: '#2563eb', title: 'Valuation Report', desc: 'A full DCF valuation using Damodaran India data - from Rs. 2,000.' },
 ];
 
-function NavBar({ user, isAdmin, onHome, onGoListings, onGoBusinesses, onSignOut }) {
+function NavBar({ user, isAdmin, onHome, onGoListings, onGoBusinesses, onGoAdmin, onSignOut }) {
   var menuSt = useState(false), menuOpen = menuSt[0], setMenuOpen = menuSt[1];
   var initial = (user && user.email ? user.email[0] : '?').toUpperCase();
 
@@ -85,7 +86,7 @@ function NavBar({ user, isAdmin, onHome, onGoListings, onGoBusinesses, onSignOut
             {[
               { label: 'Home', icon: 'ti-home', action: onHome },
               { label: 'My Businesses', icon: 'ti-building', action: onGoBusinesses },
-            ].map(function (item) {
+            ].concat(isAdmin ? [{ label: 'Admin Portal', icon: 'ti-shield-lock', action: onGoAdmin }] : []).map(function (item) {
               return (
                 <button key={item.label} onClick={function () { setMenuOpen(false); item.action(); }} style={{
                   display: 'flex', alignItems: 'center', gap: '10px', width: '100%', textAlign: 'left', padding: '10px 14px',
@@ -106,7 +107,7 @@ function NavBar({ user, isAdmin, onHome, onGoListings, onGoBusinesses, onSignOut
               { label: 'My Engagements', icon: 'ti-clipboard-list' },
               { label: 'My Interests', icon: 'ti-heart' },
               { label: 'Profile & Settings', icon: 'ti-user-cog' },
-            ].concat(isAdmin ? [{ label: 'Admin Portal', icon: 'ti-shield-lock' }] : []).map(function (item) {
+            ].map(function (item) {
               return (
                 <div key={item.label} title="Coming soon" style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', width: '100%',
@@ -495,6 +496,12 @@ export default function Platform({ user, sessionId, onSignOut }) {
   var briefSt = useState(persisted.brief || null), brief = briefSt[0], setBrief = briefSt[1];
   var sellerFormSt = useState(persisted.sellerForm || null), sellerForm = sellerFormSt[0], setSellerForm = sellerFormSt[1];
   var selEngIdSt = useState(persisted.selEngId || null), selEngId = selEngIdSt[0], setSelEngId = selEngIdSt[1];
+  // Admin Portal is a full-screen overlay, deliberately NOT a convPhase value
+  // - convPhase also drives ConversationEngine's AI persona routing (Router/
+  // discovery, Financial Analyst/analyst, etc.), which has never been taught
+  // an "admin" phase. A separate boolean keeps this screen fully isolated
+  // from that state machine, same pattern as showDirectListing below.
+  var showAdminPortalSt = useState(false), showAdminPortal = showAdminPortalSt[0], setShowAdminPortal = showAdminPortalSt[1];
   // The generated AI Financial Model Report (see generate-financial-report
   // edge function) - persisted the same way as sellerForm/convModel so it
   // survives a remount instead of forcing regeneration (a real API call,
@@ -978,7 +985,10 @@ export default function Platform({ user, sessionId, onSignOut }) {
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <NavBar user={user} isAdmin={isAdmin} onHome={goHome} onGoBusinesses={goBusinesses} onGoListings={function () { setConvPhase('listings'); }} onSignOut={onSignOut} />
+      {showAdminPortal && (
+        <AdminPortal user={user} onClose={function () { setShowAdminPortal(false); }} />
+      )}
+      <NavBar user={user} isAdmin={isAdmin} onHome={goHome} onGoBusinesses={goBusinesses} onGoListings={function () { setConvPhase('listings'); }} onGoAdmin={function () { setShowAdminPortal(true); }} onSignOut={onSignOut} />
       {directListingUpsell && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
