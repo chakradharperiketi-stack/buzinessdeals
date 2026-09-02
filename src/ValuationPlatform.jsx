@@ -7,6 +7,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from './supabase';
 import { sendNotification } from './lib/notifications';
+import PayToUnlock from './PayToUnlock';
 
 const UNIT_MULT = {Actual:1,Thousands:1e3,Lakhs:1e5,Crores:1e7,Millions:1e6,Billions:1e9};
 const FORECAST_OPTS = [3,5,7,10];
@@ -1727,14 +1728,52 @@ function CreateListingModal(p) {
   );
 }
 
-function S8_Report({f,setF,dcf,vc,rm,ec,navCalc,ai,generating,onGenerate,years,sensitivity,props}){
+function S8_Report({f,setF,dcf,vc,rm,ec,navCalc,ai,generating,onGenerate,years,sensitivity,props,valuationUnlocked,modelUnlockedForProject,onValuationUnlocked}){
   const u=f.unit, mult=UNIT_MULT[u]||1;
   const hasRev=years.some(y=>parseFloat((f.forecastMode==="auto"?computeAutoYear(f,years,years.indexOf(y)):f.forecast[y]||{}).revenue)>0);
 
+  // Was window.open("","_blank",...) + document.write() + print() on the
+  // new window. That pattern depends on the browser actually handing back
+  // a live, writable popup window - inside a sandboxed preview iframe (as
+  // Bolt serves this app from) or under a strict popup blocker, window.open
+  // can return a window reference that LOOKS valid but never actually
+  // navigates/renders, so the write silently goes nowhere and the "new tab"
+  // that does appear is blank. Printing via a hidden same-page <iframe>
+  // sidesteps this entirely - no new browsing context is created, so there
+  // is nothing for a popup blocker or sandbox to block; the iframe's own
+  // print() call still opens the browser's normal print dialog, scoped to
+  // just the iframe's document (so the report's @page/print CSS still
+  // applies exactly as before).
   const openPrint=()=>{
     const html=generateReportHTML(f,dcf,vc,rm,ec,navCalc,ai,years,sensitivity);
-    const win=window.open("","_blank","width=900,height=700");
-    if(win){win.document.write(html);win.document.close();setTimeout(()=>{win.focus();win.print();},600);}
+    const iframe=document.createElement("iframe");
+    iframe.style.position="fixed";
+    iframe.style.left="-9999px";
+    iframe.style.top="0";
+    iframe.style.width="800px";
+    iframe.style.height="1120px";
+    iframe.style.border="0";
+    document.body.appendChild(iframe);
+    var cleanup=function(){ if(iframe.parentNode) iframe.parentNode.removeChild(iframe); };
+    try{
+      var doc=iframe.contentWindow.document;
+      doc.open();
+      doc.write(html);
+      doc.close();
+      setTimeout(function(){
+        try{ iframe.contentWindow.focus(); iframe.contentWindow.print(); }
+        catch(e){ /* best-effort - the tab-based fallback below still ran */ }
+        setTimeout(cleanup,1500);
+      },400);
+    }catch(e){
+      cleanup();
+      // Last-resort fallback for a browser that blocks even the hidden
+      // iframe from writing - opens a normal tab the user can print
+      // manually from (Ctrl/Cmd+P) if the automatic print dialog above
+      // doesn't fire.
+      var win=window.open("","_blank");
+      if(win){ win.document.write(html); win.document.close(); }
+    }
   };
 
   var showListingSt=useState(false), showListingForm=showListingSt[0], setShowListingForm=showListingSt[1];
@@ -1783,6 +1822,17 @@ function S8_Report({f,setF,dcf,vc,rm,ec,navCalc,ai,generating,onGenerate,years,s
         </div>
       </div>
     )}
+    {!valuationUnlocked?(
+      <PayToUnlock
+        user={props&&props.user}
+        deliverableType="valuation"
+        deliverableId={props&&props.projectId}
+        amountLabel={modelUnlockedForProject?"Rs. 2,000":"Rs. 3,500"}
+        title="Unlock your Valuation Report"
+        description={"9-section DCF valuation with Damodaran India data, WACC computation, multi-method comparison, and a downloadable A4 report."+(modelUnlockedForProject?" Discounted since your AI Financial Model for this business is already unlocked.":"")}
+        onUnlocked={function(){ onValuationUnlocked&&onValuationUnlocked(); }}
+      />
+    ):(<>
     {!ai?<div>
       <p style={{fontSize:"12px",color:"var(--color-text-secondary)",marginBottom:"14px"}}>Click to generate the AI-assisted report. The AI generates the industry outlook, company narrative, risk analysis, and conclusion. All financial computations (DCF, WACC, sensitivity) auto-populate from your inputs.</p>
       <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
@@ -1854,6 +1904,7 @@ function S8_Report({f,setF,dcf,vc,rm,ec,navCalc,ai,generating,onGenerate,years,s
         </div>
       </div>
     )}
+    </>)}
   </div>;
 }
 
@@ -1880,6 +1931,37 @@ function ValuationPlatform(props){
   var origFormSt=useState(null),origForm=origFormSt[0],setOrigForm=origFormSt[1];
   var bannerSt=useState(null),bannerMsg=bannerSt[0],setBannerMsg=bannerSt[1];
   var bannerTimerSt=useState(null),bannerTimer=bannerTimerSt[0],setBannerTimer=bannerTimerSt[1];
+  // Payment gating for Section 8 (Report generation) - see migration
+  // 003_razorpay_payments.sql. Keyed on props.projectId, NOT
+  // props.engagementId - the "engagements" table's autosave/resume path is
+  // never actually wired to a real row anywhere in this app today (every
+  // setSelEngId call in Platform.jsx passes null), so gating payment on it
+  // would mean nobody could ever unlock this section. project_id is what
+  // every other working piece of this app (financial_model_reports, the
+  // project switcher) actually uses to mean "which business is this."
+  // Starts locked (not "loading") so there's no flash of paid content
+  // before the real status is known - failing closed visually, matching
+  // how it's enforced everywhere else (the server, not this flag, is what
+  // actually protects the deliverable).
+  var valUnlockSt=useState(false),valuationUnlocked=valUnlockSt[0],setValuationUnlocked=valUnlockSt[1];
+  var modelUnlockSt=useState(false),modelUnlockedForProject=modelUnlockSt[0],setModelUnlockedForProject=modelUnlockSt[1];
+
+  useEffect(function(){
+    var cancelled=false;
+    if(!props.projectId){ setValuationUnlocked(false); return; }
+    supabase.from('valuation_unlocks').select('unlocked').eq('project_id',props.projectId).maybeSingle()
+      .then(function(res){ if(!cancelled) setValuationUnlocked(!!(res.data&&res.data.unlocked)); })
+      .catch(function(e){ if(!cancelled) setValuationUnlocked(false); console.error('Failed to load valuation unlock status:',e); });
+    // Best-effort only - this purely decides which price PayToUnlock
+    // displays (Rs. 2,000 vs Rs. 3,500). The amount actually charged is
+    // always recomputed authoritatively server-side in
+    // create-razorpay-order, so a stale/failed read here never lets anyone
+    // pay less than they should.
+    supabase.from('financial_model_reports').select('id').eq('project_id',props.projectId).eq('unlocked',true).limit(1).maybeSingle()
+      .then(function(res){ if(!cancelled) setModelUnlockedForProject(!!(res.data)); })
+      .catch(function(){});
+    return function(){cancelled=true;};
+  },[props.projectId]);
 
   async function saveValuationForm(formData,engagementId){
     if(!props.user||!engagementId)return;
@@ -2144,7 +2226,7 @@ Return ONLY valid JSON (no markdown, no preamble):
       {sec.id==="methods"&&<S5_Methods f={form} setF={setForm} onNext={()=>goNext("methods")}/>}
       {sec.id==="wacc"&&<S6_WACC f={form} setF={setForm} onNext={()=>goNext("wacc")}/>}
       {sec.id==="results"&&<S7_Results f={form} dcf={dcf} vc={vc} rm={rm} ec={ec} navCalc={navCalc} years={years} sensitivity={sensitivity}/>}
-      {sec.id==="report"&&<S8_Report f={form} setF={setForm} dcf={dcf} vc={vc} rm={rm} ec={ec} navCalc={navCalc} ai={ai} generating={gen} onGenerate={generate} years={years} sensitivity={sensitivity} props={props}/>}
+      {sec.id==="report"&&<S8_Report f={form} setF={setForm} dcf={dcf} vc={vc} rm={rm} ec={ec} navCalc={navCalc} ai={ai} generating={gen} onGenerate={generate} years={years} sensitivity={sensitivity} props={props} valuationUnlocked={valuationUnlocked} modelUnlockedForProject={modelUnlockedForProject} onValuationUnlocked={function(){setValuationUnlocked(true);}}/>}
     </AccordionSection>)}
     {err&&<p style={{fontSize:"11px",color:"var(--color-text-danger)",marginTop:"8px"}}>{err}</p>}
   </div>;
