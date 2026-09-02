@@ -17,6 +17,7 @@ import { buildYearSeries } from './lib/financialModel';
 import { buildTrendBarChart, buildMarginLineChart, buildCostStructureBar } from './lib/charts';
 import ChartSvg from './ChartSvg';
 import { generateReportPdf } from './lib/reportApi';
+import PayToUnlock from './PayToUnlock';
 
 var BASIS_LABELS = {
   client_confirmed: { text: 'Client confirmed', color: '#16a34a', bg: 'rgba(22,163,74,0.1)' },
@@ -129,7 +130,7 @@ function DownloadPdfBar({ report, panelCompletionPct, onReportUpdated }) {
   );
 }
 
-export default function FinancialReportPreview({ report, panelCompletionPct, onReportUpdated }) {
+export default function FinancialReportPreview({ report, panelCompletionPct, onReportUpdated, userId, userEmail }) {
   if (!report) return null;
 
   if (report.status === 'failed') {
@@ -145,6 +146,11 @@ export default function FinancialReportPreview({ report, panelCompletionPct, onR
   var d = report.report_data || {};
   var bp = (report.extraction && report.extraction.businessProfile) || {};
   var assumptions = d.assumptions || {};
+  // report.unlocked defaults true for reports created before payment
+  // gating existed (see migration 003_razorpay_payments.sql) - only
+  // reports generated after that migration start locked, so nothing
+  // already-generated for an existing user disappears behind a paywall.
+  var locked = report.unlocked === false;
 
   var computed = report.computed_model;
   var yearSeries = computed ? buildYearSeries(computed) : [];
@@ -166,6 +172,18 @@ export default function FinancialReportPreview({ report, panelCompletionPct, onR
         <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>{bp.sector || 'Sector not specified'} &middot; Generated {d.generatedAt ? new Date(d.generatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</p>
       </div>
 
+      {locked ? (
+        <PayToUnlock
+          user={{ id: userId, email: userEmail }}
+          deliverableType="ai_model"
+          deliverableId={report.id}
+          amountLabel="Rs. 1,500"
+          title="Unlock your AI Financial Model Report"
+          description="Full narrative analysis, business model breakdown, financial trends and risk assessment, plus a downloadable PDF."
+          onUnlocked={function () { onReportUpdated && onReportUpdated(Object.assign({}, report, { unlocked: true })); }}
+        />
+      ) : (
+      <>
       <Card title="Executive summary">
         <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.7' }}>{d.executiveSummary}</p>
       </Card>
@@ -255,6 +273,8 @@ export default function FinancialReportPreview({ report, panelCompletionPct, onR
       </div>
 
       <DownloadPdfBar report={report} panelCompletionPct={panelCompletionPct} onReportUpdated={onReportUpdated} />
+      </>
+      )}
     </div>
   );
 }
