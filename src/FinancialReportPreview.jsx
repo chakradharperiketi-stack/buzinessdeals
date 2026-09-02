@@ -111,7 +111,7 @@ function DownloadPdfBar({ report, panelCompletionPct, onReportUpdated }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', margin: '4px 0 18px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', margin: '18px 0 4px' }}>
       {report.pdf_url ? (
         <a href={report.pdf_url} target="_blank" rel="noopener noreferrer" style={{
           padding: '10px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: '600',
@@ -166,8 +166,6 @@ export default function FinancialReportPreview({ report, panelCompletionPct, onR
         <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>{bp.sector || 'Sector not specified'} &middot; Generated {d.generatedAt ? new Date(d.generatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</p>
       </div>
 
-      <DownloadPdfBar report={report} panelCompletionPct={panelCompletionPct} onReportUpdated={onReportUpdated} />
-
       <Card title="Executive summary">
         <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.7' }}>{d.executiveSummary}</p>
       </Card>
@@ -176,6 +174,12 @@ export default function FinancialReportPreview({ report, panelCompletionPct, onR
         <Card title="Business model analysis" accent>
           <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 4px', lineHeight: '1.7' }}>{d.businessModel.summary}</p>
           <DriverChain businessModel={d.businessModel} />
+        </Card>
+      )}
+
+      {d.industryOutlook && (
+        <Card title="Industry outlook">
+          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.7' }}>{d.industryOutlook}</p>
         </Card>
       )}
 
@@ -249,6 +253,8 @@ export default function FinancialReportPreview({ report, panelCompletionPct, onR
           A full integrated Profit &amp; Loss, Balance Sheet and Cash Flow model, detailed capex and debt schedules, scenario and sensitivity analysis, and a formula-driven Excel model are available as part of the deeper financial modelling engagement.
         </p>
       </div>
+
+      <DownloadPdfBar report={report} panelCompletionPct={panelCompletionPct} onReportUpdated={onReportUpdated} />
     </div>
   );
 }
