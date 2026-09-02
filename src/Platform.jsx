@@ -501,7 +501,18 @@ export default function Platform({ user, sessionId, onSignOut }) {
   // discovery, Financial Analyst/analyst, etc.), which has never been taught
   // an "admin" phase. A separate boolean keeps this screen fully isolated
   // from that state machine, same pattern as showDirectListing below.
-  var showAdminPortalSt = useState(false), showAdminPortal = showAdminPortalSt[0], setShowAdminPortal = showAdminPortalSt[1];
+  //
+  // Defaults to true for admin accounts - an admin logging in has no reason
+  // to land on the seller/buyer discovery Home screen first. Computed
+  // inline here (rather than reusing the `isAdmin` var declared further
+  // below) purely because this runs earlier in the component and a fresh
+  // useState initializer only ever reads its argument once, on mount - not
+  // a hook-ordering concern, just avoids restructuring unrelated code.
+  // "Back to platform" (inside AdminPortal) still reaches the normal Home
+  // screen at any time, e.g. for testing the seller/buyer flows from this
+  // same admin login - it only clears this flag, nothing more.
+  var showAdminPortalSt = useState(!!(user && user.email && ADMIN_EMAILS.indexOf(user.email.toLowerCase()) !== -1)),
+    showAdminPortal = showAdminPortalSt[0], setShowAdminPortal = showAdminPortalSt[1];
   // The generated AI Financial Model Report (see generate-financial-report
   // edge function) - persisted the same way as sellerForm/convModel so it
   // survives a remount instead of forcing regeneration (a real API call,
