@@ -53,6 +53,49 @@ function deriveOpex(extraction) {
   return (extraction.opex && extraction.opex.annualTotal) || 0;
 }
 
+// Phase 3 of the single-source-of-truth rebuild (see chat, 3 Sept 2026).
+// The 5-year projection used to grow ONE blended total (rev, then a
+// constant cogsPct of it, then opex at a flat 8%) even when the extraction
+// carried a real itemized breakdown (revenue.segments, cogs.lineItems,
+// staffingBuildUp, opex.lineItems) - so the report could show "here's how
+// this business breaks down today" and then silently blur that same
+// breakdown into one line for every future year. This function projects
+// each item forward on its OWN trajectory instead: an item's own
+// growthPct (captured by the interview only when a seller actually says a
+// segment/cost line moves differently - see ai-search-v2's Growth
+// Assumptions instructions) if present, else a sensible default that
+// reproduces today's aggregate behaviour exactly when nothing itemized
+// exists or no item carries an override - see the three call sites below
+// for what each default is. MUST be mirrored exactly in the two
+// server-side copies (generate-financial-report/index.ts, ai-search-v2/
+// index.ts), same discipline as deriveRevenue/deriveDirectCosts/deriveOpex
+// above - generate-financial-report-pdf/index.ts has no copy of its own,
+// it reads the already-computed years[].driverBreakdown from the database.
+//
+// getOwnGrowth(item) returns a fraction (0.12, not 12) or null/undefined
+// to fall back to fallbackGRates[i] (the year's blended/default rate).
+// Returns { totals: [yr0..yrN], perItem: [{label, base, growthPct, values:[yr0..yrN]}] }.
+function projectItemSeries(items, getLabel, getBase, getOwnGrowth, fallbackGRates) {
+  var perItem = items.map(function (item) {
+    var base = getBase(item) || 0;
+    var ownG = getOwnGrowth(item);
+    ownG = (ownG === null || ownG === undefined || isNaN(ownG)) ? null : ownG;
+    var values = fallbackGRates.map(function (_, i) {
+      var v = base;
+      for (var j = 0; j <= i; j++) {
+        var g = ownG != null ? ownG : fallbackGRates[j];
+        v = v * (1 + g);
+      }
+      return Math.round(v * 100) / 100;
+    });
+    return { label: getLabel(item), base: Math.round(base * 100) / 100, growthPct: ownG != null ? Math.round(ownG * 1000) / 10 : null, values: values };
+  });
+  var totals = fallbackGRates.map(function (_, i) {
+    return Math.round(perItem.reduce(function (s, p) { return s + p.values[i]; }, 0) * 100) / 100;
+  });
+  return { totals: totals, perItem: perItem };
+}
+
 export function computeModel(extraction) {
   if (!extraction) return null;
   var rev = deriveRevenue(extraction);
@@ -92,22 +135,78 @@ export function computeModel(extraction) {
   ];
   var cogsPct = rev > 0 ? cogs / rev : 0.5;
 
+  // Bottom-up projection (Phase 3) - each revenue segment and cost line
+  // grows on its own trajectory when the interview captured one, else
+  // falls back to a default chosen to exactly reproduce the old
+  // single-blended-total behaviour so a business with no itemized data
+  // (or no overrides) sees IDENTICAL numbers to before this change.
+  var segments = (extraction.revenue && extraction.revenue.segments) || [];
+  var hasSegRev = segments.length > 0 && segments.reduce(function (s, sg) { return s + ((Number(sg.monthlyRevenue) || 0) * 12); }, 0) > 0;
+  var revSeries = hasSegRev
+    ? projectItemSeries(segments, function (sg) { return sg.product || 'Revenue stream'; }, function (sg) { return (Number(sg.monthlyRevenue) || 0) * 12; }, function (sg) { return sg.growthPct != null ? Number(sg.growthPct) / 100 : null; }, gRates)
+    : { totals: gRates.map(function (_, i) { var r = rev; for (var j = 0; j <= i; j++) r = r * (1 + gRates[j]); return r; }), perItem: [] };
+
+  var cogsLines = (extraction.cogs && extraction.cogs.lineItems) || [];
+  var staffingAnnual = (extraction.staffingBuildUp && extraction.staffingBuildUp.annualTotal) || 0;
+  var hasCogsDetail = cogsLines.length > 0 || staffingAnnual > 0;
+  var cogsLineSeries = hasCogsDetail
+    ? projectItemSeries(cogsLines, function (li) { return li.item || 'Direct cost'; }, function (li) { return (Number(li.monthlyAmount) || 0) * 12; }, function (li) { return li.growthPct != null ? Number(li.growthPct) / 100 : null; }, gRates)
+    : { totals: gRates.map(function () { return 0; }), perItem: [] };
+  // Staffing's default (no explicit override) tracks the same blended
+  // revenue growth curve as everything else in "direct costs" - this is
+  // what makes the no-override case reproduce the pre-Phase-3 numbers
+  // exactly (old code folded staffing into one cogsPct-of-revenue figure).
+  // An override only exists when the interview actually captured the
+  // seller saying staffing moves differently from sales (e.g. a planned
+  // headcount freeze, or wage inflation independent of volume).
+  var staffOwnGrowth = (extraction.staffingBuildUp && extraction.staffingBuildUp.growthPct != null) ? Number(extraction.staffingBuildUp.growthPct) / 100 : null;
+  var staffSeries = staffingAnnual > 0
+    ? projectItemSeries([{}], function () { return 'Staffing'; }, function () { return staffingAnnual; }, function () { return staffOwnGrowth; }, gRates)
+    : { totals: gRates.map(function () { return 0; }), perItem: [] };
+  var cogsTotals = hasCogsDetail
+    ? gRates.map(function (_, i) { return Math.round((cogsLineSeries.totals[i] + staffSeries.totals[i]) * 100) / 100; })
+    : gRates.map(function (_, i) { return Math.round((revSeries.totals[i] * cogsPct) * 100) / 100; });
+
+  var opexLines = (extraction.opex && extraction.opex.lineItems) || [];
+  var hasOpexDetail = opexLines.length > 0;
+  // Default fallback rate is flat 8% inflation per year, NOT the revenue
+  // growth curve - opex line items are fixed costs, not revenue-linked,
+  // same assumption the old single-bucket "opex * 1.08^i" made. First slot
+  // is 0%, not 8%: projectItemSeries compounds j<=i inclusive, so a
+  // constant-8% array would apply a year of growth already in "Year 1" -
+  // the old Math.pow(1.08, i) formula (i is 0-indexed) does NOT, Year 1
+  // is the unchanged base figure and growth first shows in Year 2. This
+  // [0, 0.08, 0.08, 0.08, 0.08] shape reproduces that exactly, so a
+  // business's opex trajectory doesn't shift just because its interview
+  // happened to capture line items instead of one aggregate figure.
+  var opexFallbackRates = gRates.map(function (_, idx) { return idx === 0 ? 0 : 0.08; });
+  var opexLineSeries = hasOpexDetail
+    ? projectItemSeries(opexLines, function (li) { return li.item || 'Operating cost'; }, function (li) { return (Number(li.monthlyAmount) || 0) * 12; }, function (li) { return li.growthPct != null ? Number(li.growthPct) / 100 : null; }, opexFallbackRates)
+    : { totals: gRates.map(function (_, i) { return Math.round((opex * Math.pow(1.08, i)) * 100) / 100; }), perItem: [] };
+
   var years = gRates.map(function (g, i) {
-    var r = rev;
-    for (var j = 0; j <= i; j++) r = r * (1 + gRates[j]);
-    var c = r * cogsPct;
-    var ox = opex * Math.pow(1.08, i);
+    var r = revSeries.totals[i], c = cogsTotals[i], ox = opexLineSeries.totals[i];
     var gpYr = r - c, eYr = gpYr - ox, ebitYr = eYr - dep, pbtYr = ebitYr - interest;
     var taxYr = Math.max(0, pbtYr) * 0.26, patYr = pbtYr - taxYr;
     var capYr = (proj.plannedCapex || 0) / 5;
     var nwcYr = (r * recDays) / 365 + (c * invDays) / 365 - (c * payDays) / 365;
-    var prevRev = i === 0 ? rev : rev * gRates.slice(0, i).reduce(function (acc, gg) { return acc * (1 + gg); }, 1);
+    var prevRev = i === 0 ? rev : revSeries.totals[i - 1];
     var prevNWC = (prevRev * recDays) / 365;
     var dnwc = nwcYr - prevNWC;
     var fcff = patYr + dep + interest * 0.74 - capYr - dnwc;
     return {
       yr: 'FY' + (2027 + i), rev: r, cogs: c, gp: gpYr, opex: ox, ebitda: eYr, dep: dep,
       ebit: ebitYr, interest: interest, pbt: pbtYr, tax: taxYr, pat: patYr, capex: capYr, dnwc: dnwc, fcff: fcff,
+      // Bottom-up detail for this year, so the report can show a real
+      // segment-by-segment/line-by-line driver table across the forecast,
+      // not just the current year. Null when no itemized data existed to
+      // project (Case 3 / early-conversation businesses) - same
+      // "itemized data only when it's real" rule as computed.segments etc.
+      driverBreakdown: (hasSegRev || hasCogsDetail || hasOpexDetail) ? {
+        revenue: revSeries.perItem.map(function (p) { return { label: p.label, value: p.values[i], growthPct: p.growthPct }; }),
+        directCosts: cogsLineSeries.perItem.concat(staffSeries.perItem).map(function (p) { return { label: p.label, value: p.values[i], growthPct: p.growthPct }; }),
+        opex: opexLineSeries.perItem.map(function (p) { return { label: p.label, value: p.values[i], growthPct: p.growthPct }; }),
+      } : null,
     };
   });
 
