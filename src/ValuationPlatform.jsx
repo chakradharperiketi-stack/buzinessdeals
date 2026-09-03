@@ -1998,6 +1998,21 @@ function ValuationPlatform(props){
     return function(){cancelled=true;};
   },[props.projectId]);
 
+  // Restore a previously-generated AI valuation narrative on mount/project
+  // switch, so it survives a refresh instead of forcing a regenerate every
+  // time (see 006_valuation_reports.sql). Does not overwrite `ai` once a
+  // fresh generate() has run in this session - only fills it when still
+  // null, so a user who clicks Regenerate mid-session always sees their new
+  // result, never a stale saved one racing back in.
+  useEffect(function(){
+    var cancelled=false;
+    if(!props.projectId)return;
+    supabase.from('valuation_reports').select('ai_narrative').eq('project_id',props.projectId).maybeSingle()
+      .then(function(res){ if(!cancelled&&res.data&&res.data.ai_narrative) setAi(function(prev){return prev||res.data.ai_narrative;}); })
+      .catch(function(){});
+    return function(){cancelled=true;};
+  },[props.projectId]);
+
   async function saveValuationForm(formData,engagementId){
     if(!props.user||!engagementId)return;
     try{
@@ -2165,7 +2180,27 @@ Return ONLY valid JSON (no markdown, no preamble):
       const res=await fetch("https://mpjxulzllmmoiqaqwart.supabase.co/functions/v1/quick-worker",{method:"POST",headers:{"Content-Type":"application/json","apikey":"sb_publishable_0Xkatb8dUNbdP44AWek6Hg_Br4SNyf2","Authorization":"Bearer sb_publishable_0Xkatb8dUNbdP44AWek6Hg_Br4SNyf2"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:4000,messages:[{role:"user",content:prompt}]})});
       const data=await res.json();
       const text=data.content?.map(c=>c.text||"").join("").trim();
-      setAi(JSON.parse(text.replace(/```json|```/g,"").trim()));
+      const parsed=JSON.parse(text.replace(/```json|```/g,"").trim());
+      setAi(parsed);
+      // Persist the generated narrative so it survives a refresh/navigation
+      // instead of living only in this component's memory (see
+      // 006_valuation_reports.sql for why - the "engagements" table's
+      // valuation_form save/restore below this function never actually
+      // fires in the live app, and there was no persistence at all for the
+      // AI narrative itself). Best-effort: a failed save here should not
+      // block the user from seeing/printing the report they just generated,
+      // it only means it won't be there on their next visit.
+      if(props.projectId&&props.user){
+        try{
+          await supabase.from("valuation_reports").upsert({
+            project_id:props.projectId,
+            user_id:props.user.id,
+            ai_narrative:parsed,
+            valuation_snapshot:{form:form,dcf:{ev:dcf.ev,eqVal:dcf.eqVal,vps:dcf.vps,wacc:dcf.wacc}},
+            updated_at:new Date().toISOString(),
+          },{onConflict:"project_id"});
+        }catch(saveErr){console.error("Failed to save valuation report:",saveErr);}
+      }
     }catch(e){
       setErr("Generation error: "+e.message);
       setAi({industryOutlook:"Industry outlook not generated. Please try again.",companyBackground:"Company background not generated.",riskFactors:[],conclusion:"Conclusion not generated."});
