@@ -268,7 +268,7 @@ const initForm=()=>{
     valuationDate:new Date().toISOString().split("T")[0],purpose:PURPOSES[2],
     authCapital:"",paidUpCapital:"",faceValue:"10",numShares:"",
     shareholders:[{name:"",din:"",shares:"",designation:"Director"}],
-    sector:s.name,stage:STAGES[0],
+    sector:s.name,sectorAutoMatched:true,sectorRawText:"",stage:STAGES[0],
     sectorBeta:s.beta.toFixed(3),sectorUnlev:s.unlevBeta.toFixed(3),
     productsServices:[],revenueModel:[],customerSegments:[],
     competitiveAdvantage:[],growthDrivers:[],keyRisks:[],
@@ -600,9 +600,23 @@ function S1_Company({f,setF,onNext}){
 function S2_Business({f,setF,onNext}){
   const handleSector=v=>{
     const s=SECTORS.find(x=>x.name===v);
-    setF({...f,sector:v,sectorBeta:s?s.beta.toFixed(3):f.sectorBeta,sectorUnlev:s?s.unlevBeta.toFixed(3):f.sectorUnlev,beta:s?s.beta.toFixed(3):f.beta,selectedMethods:s?s.reco:f.selectedMethods});
+    // A manual pick from this dropdown IS the confirmation - whatever
+    // auto-match warning was showing (see banner below) clears the moment
+    // the user makes an explicit choice, guessed correctly or not.
+    setF({...f,sector:v,sectorAutoMatched:true,sectorBeta:s?s.beta.toFixed(3):f.sectorBeta,sectorUnlev:s?s.unlevBeta.toFixed(3):f.sectorUnlev,beta:s?s.beta.toFixed(3):f.beta,selectedMethods:s?s.reco:f.selectedMethods});
   };
   return <div>
+    {f.sectorAutoMatched===false && (
+      <div style={{display:"flex",gap:"10px",alignItems:"flex-start",padding:"10px 14px",borderRadius:"8px",background:"#fffbeb",border:"1px solid #fcd34d",marginBottom:"14px"}}>
+        <i className="ti ti-alert-triangle" aria-hidden="true" style={{fontSize:"15px",color:"#92400e",marginTop:"1px"}}/>
+        <p style={{fontSize:"12px",color:"#92400e",margin:0,lineHeight:"1.5"}}>
+          Your Financial Model interview described this business as <strong>"{f.sectorRawText||"—"}"</strong>, which
+          doesn't match a listed industry closely enough to auto-select one. It's currently set to <strong>{f.sector}</strong> as
+          a placeholder — please pick the correct industry below before generating the report; the wrong sector changes the
+          cost template, beta, and industry narrative throughout.
+        </p>
+      </div>
+    )}
     <G cols={2}>
       <Sel label="Industry / Sector" value={f.sector} onChange={handleSector} options={SECTORS.map(s=>({value:s.name,label:s.name}))} n={`Damodaran India Jan 2026 - Levered B: ${f.sectorBeta} | Unlevered B: ${f.sectorUnlev}`}/>
       <Sel label="Business stage" value={f.stage} onChange={v=>setF({...f,stage:v})} options={STAGES} n="Drives recommended valuation methods"/>
