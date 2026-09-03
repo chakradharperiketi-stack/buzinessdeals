@@ -189,6 +189,15 @@ export function buildV3FormFromModel(extraction, computed, profile) {
     companyName: (fm.businessProfile && fm.businessProfile.name) || '',
     sector: sector,
     sectorAutoMatched: sectorAutoMatched,
+    // Fixed reference point, set once at handoff and never mutated by
+    // handleSector - lets ValuationPlatform detect the OTHER direction of
+    // sector mismatch: not just "we couldn't guess", but "we guessed
+    // correctly and someone later changed it to something else", which
+    // silently produces a Financial Model report and a Valuation report
+    // describing two different industries for the same business. Null when
+    // sectorAutoMatched is false - there's no confirmed match to diverge
+    // FROM in that case, that's the other banner's job.
+    sectorSuggested: sectorAutoMatched ? sector : null,
     sectorRawText: (fm.businessProfile && fm.businessProfile.sector) || '',
     sectorBeta: sectorData.beta ? sectorData.beta.toFixed(3) : '0.8',
     beta: sectorData.beta ? sectorData.beta.toFixed(3) : '0.8',
