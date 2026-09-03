@@ -40,10 +40,22 @@ export function buildV3FormFromModel(extraction, computed, profile) {
   var proj = fm.projections || {};
   var gRates = [proj.year1GrowthPct || 15, proj.year2GrowthPct || 15, proj.year3GrowthPct || 15, proj.year4GrowthPct || 15, proj.year5GrowthPct || 15];
 
+  // Phase 2 of the single-source-of-truth rebuild (2 Sept 2026): this used
+  // to default straight to 'Trading / Distribution' with no signal that it
+  // was a guess - that's exactly how a fashion boutique's interview sector
+  // ("Fashion Designer and Boutique", no keyword match) silently became a
+  // "Trading / Distribution" valuation report with a matching Industry
+  // Outlook paragraph and cost template. The default is unchanged (still
+  // needs SOME valid SECTORS entry for beta/template to resolve), but the
+  // match outcome is no longer hidden - sectorAutoMatched:false travels
+  // with the form so the UI can visibly ask the user to confirm/correct it
+  // (see S2_Business's banner in ValuationPlatform.jsx) instead of quietly
+  // proceeding on an unconfirmed guess.
   var sRaw = ((fm.businessProfile && fm.businessProfile.sector) || '').toLowerCase();
   var sector = 'Trading / Distribution';
+  var sectorAutoMatched = false;
   Object.keys(SECTOR_MAP).forEach(function (key) {
-    if (sRaw.includes(key)) sector = SECTOR_MAP[key];
+    if (sRaw.includes(key)) { sector = SECTOR_MAP[key]; sectorAutoMatched = true; }
   });
   var sectorData = SECTORS.find(function (s) { return s.name === sector; }) || SECTORS[0];
   // The actual PL_TEMPLATES key this sector renders under (see the forecast
@@ -60,13 +72,38 @@ export function buildV3FormFromModel(extraction, computed, profile) {
   var cogsLines = (fm.cogs && fm.cogs.lineItems) || [];
   var opexLines = (fm.opex && fm.opex.lineItems) || [];
 
+  // Phase 2 fix (2 Sept 2026): this split is presentation only - it decides
+  // which report line item each Rupee of opex shows up under, it must never
+  // change the total. The old `if (misc < 0) misc = 0` clamp broke that
+  // guarantee: whenever the keyword-matched (or fallback-%) guesses summed
+  // to MORE than the real baseOpex, the excess was silently discarded
+  // instead of trimmed, so the row's total (and therefore EBITDA) came out
+  // below the AI Financial Model's real number - the mechanism behind the
+  // Rs 219.76L vs Rs 167L gap. Now: if the guesses fit inside baseOpex,
+  // misc absorbs the exact remainder (unchanged behaviour). If they
+  // overshoot, every guess is scaled down proportionally so the five items
+  // sum to exactly baseOpex and misc is 0 - never a number invented, never
+  // a number dropped.
   var salaries = findCost(opexLines, ['salary', 'salari', 'staff', 'employee', 'people']) || Math.round(baseOpex * 0.70);
   var technology = findCost(opexLines, ['tech', 'platform', 'software', 'hosting', 'it']) || Math.round(baseOpex * 0.08);
   var rent = findCost(opexLines, ['rent', 'office']) || Math.round(baseOpex * 0.04);
   var marketing = findCost(opexLines, ['market', 'advertis', 'sales']) || Math.round(baseOpex * 0.06);
   var badDebt = findCost(opexLines, ['bad debt', 'provision', 'doubtful']) || Math.round(baseOpex * 0.10);
-  var misc = baseOpex - salaries - technology - rent - marketing - badDebt;
-  if (misc < 0) misc = 0;
+  var misc;
+  var guessSum = salaries + technology + rent + marketing + badDebt;
+  if (guessSum <= baseOpex) {
+    misc = baseOpex - guessSum;
+  } else if (guessSum > 0) {
+    var scale = baseOpex / guessSum;
+    salaries = Math.round(salaries * scale);
+    technology = Math.round(technology * scale);
+    rent = Math.round(rent * scale);
+    marketing = Math.round(marketing * scale);
+    badDebt = Math.round(badDebt * scale);
+    misc = baseOpex - (salaries + technology + rent + marketing + badDebt); // absorbs rounding remainder only
+  } else {
+    misc = baseOpex;
+  }
 
   var yrKeys = ['FY2026-27', 'FY2027-28', 'FY2028-29', 'FY2029-30', 'FY2030-31'];
   var forecast = {};
@@ -151,6 +188,8 @@ export function buildV3FormFromModel(extraction, computed, profile) {
     purpose: 'Business Sale / Investment Advisory',
     companyName: (fm.businessProfile && fm.businessProfile.name) || '',
     sector: sector,
+    sectorAutoMatched: sectorAutoMatched,
+    sectorRawText: (fm.businessProfile && fm.businessProfile.sector) || '',
     sectorBeta: sectorData.beta ? sectorData.beta.toFixed(3) : '0.8',
     beta: sectorData.beta ? sectorData.beta.toFixed(3) : '0.8',
     stage: (fm.businessProfile && fm.businessProfile.yearsOperating > 5) ? 'Growth Stage (scaling)' : 'Early Stage (0-2 yrs revenue)',
