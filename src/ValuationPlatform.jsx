@@ -268,7 +268,7 @@ const initForm=()=>{
     valuationDate:new Date().toISOString().split("T")[0],purpose:PURPOSES[2],
     authCapital:"",paidUpCapital:"",faceValue:"10",numShares:"",
     shareholders:[{name:"",din:"",shares:"",designation:"Director"}],
-    sector:s.name,sectorAutoMatched:true,sectorRawText:"",stage:STAGES[0],
+    sector:s.name,sectorAutoMatched:true,sectorSuggested:null,sectorRawText:"",stage:STAGES[0],
     sectorBeta:s.beta.toFixed(3),sectorUnlev:s.unlevBeta.toFixed(3),
     productsServices:[],revenueModel:[],customerSegments:[],
     competitiveAdvantage:[],growthDrivers:[],keyRisks:[],
@@ -600,13 +600,23 @@ function S1_Company({f,setF,onNext}){
 function S2_Business({f,setF,onNext}){
   const handleSector=v=>{
     const s=SECTORS.find(x=>x.name===v);
-    // A manual pick from this dropdown IS the confirmation - whatever
-    // auto-match warning was showing (see banner below) clears the moment
-    // the user makes an explicit choice, guessed correctly or not.
-    setF({...f,sector:v,sectorAutoMatched:true,sectorBeta:s?s.beta.toFixed(3):f.sectorBeta,sectorUnlev:s?s.unlevBeta.toFixed(3):f.sectorUnlev,beta:s?s.beta.toFixed(3):f.beta,selectedMethods:s?s.reco:f.selectedMethods});
+    // Note: sectorAutoMatched is left AS-IS here deliberately - it records
+    // whether the ORIGINAL interview handoff found a confident match, not
+    // whether the current value is "confirmed". A manual pick clears the
+    // "we couldn't guess" banner (that condition is about f.sector itself,
+    // see below) but must NOT erase sectorSuggested, or the second banner
+    // (divergence from a correctly-matched interview sector) loses its
+    // reference point and stops being able to warn on exactly this case.
+    setF({...f,sector:v,sectorBeta:s?s.beta.toFixed(3):f.sectorBeta,sectorUnlev:s?s.unlevBeta.toFixed(3):f.sectorUnlev,beta:s?s.beta.toFixed(3):f.beta,selectedMethods:s?s.reco:f.selectedMethods});
   };
+  // Two distinct, both-visible situations, not one: couldn't classify at
+  // all (no reference point exists), vs. classified fine but the currently
+  // selected sector has since drifted away from it (user override, click
+  // slip, or a stale value carried from an earlier interview edit).
+  const sectorUnconfirmed = f.sectorAutoMatched===false && f.sector!==undefined;
+  const sectorDiverged = !!(f.sectorSuggested && f.sector!==f.sectorSuggested);
   return <div>
-    {f.sectorAutoMatched===false && (
+    {sectorUnconfirmed && (
       <div style={{display:"flex",gap:"10px",alignItems:"flex-start",padding:"10px 14px",borderRadius:"8px",background:"#fffbeb",border:"1px solid #fcd34d",marginBottom:"14px"}}>
         <i className="ti ti-alert-triangle" aria-hidden="true" style={{fontSize:"15px",color:"#92400e",marginTop:"1px"}}/>
         <p style={{fontSize:"12px",color:"#92400e",margin:0,lineHeight:"1.5"}}>
@@ -614,6 +624,17 @@ function S2_Business({f,setF,onNext}){
           doesn't match a listed industry closely enough to auto-select one. It's currently set to <strong>{f.sector}</strong> as
           a placeholder — please pick the correct industry below before generating the report; the wrong sector changes the
           cost template, beta, and industry narrative throughout.
+        </p>
+      </div>
+    )}
+    {sectorDiverged && (
+      <div style={{display:"flex",gap:"10px",alignItems:"flex-start",padding:"10px 14px",borderRadius:"8px",background:"#fffbeb",border:"1px solid #fcd34d",marginBottom:"14px"}}>
+        <i className="ti ti-alert-triangle" aria-hidden="true" style={{fontSize:"15px",color:"#92400e",marginTop:"1px"}}/>
+        <p style={{fontSize:"12px",color:"#92400e",margin:0,lineHeight:"1.5"}}>
+          Your Financial Model interview matched this business (<strong>"{f.sectorRawText||"—"}"</strong>) to <strong>{f.sectorSuggested}</strong>,
+          but this valuation is currently set to <strong>{f.sector}</strong> instead. If that's intentional, no action needed —
+          otherwise, the Financial Model report and this Valuation report will describe the business under two different
+          industries. Switch back to <strong>{f.sectorSuggested}</strong> below if the change wasn't deliberate.
         </p>
       </div>
     )}
