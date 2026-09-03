@@ -11,11 +11,53 @@
 
 var DEP_RATES = { building: 0.10, machinery: 0.15, vehicles: 0.15, computers: 0.40, furniture: 0.10, other: 0.15 };
 
+// Phase 2 of the single-source-of-truth rebuild (see chat, 2 Sept 2026).
+// Root cause of the Z ab Studios reconciliation bugs: computeModel() used to
+// trust extraction.revenue.annualTotal / cogs.annualTotal / opex.annualTotal
+// as independently-submitted facts, even when the SAME extraction also
+// carried itemized data (revenue.segments, cogs.lineItems, opex.lineItems,
+// staffingBuildUp.roles) that summed to a DIFFERENT total - and that
+// itemized data is exactly what the generated report's own tables (Revenue
+// Engine, Cost Architecture) display. Two numbers for the same fact, next
+// to each other in one PDF. These three functions make the itemized data
+// authoritative whenever it exists - annualTotal is now only a fallback for
+// the (Case 3 / early-conversation) situation where nothing itemized has
+// been captured yet. This mirrors the same derive-don't-assert rule as
+// lib/canonicalModel.js's validateConsistency(). MUST be mirrored exactly
+// in the three server-side copies of computeModel() (generate-financial-
+// report/index.ts, generate-financial-report-pdf/index.ts, ai-search-v2/
+// index.ts) - if this logic changes here, it has to change there too, or
+// the PDF (generated server-side) silently reverts to the old numbers.
+
+function deriveRevenue(extraction) {
+  var segments = (extraction.revenue && extraction.revenue.segments) || [];
+  var segSum = segments.reduce(function (s, seg) { return s + (Number(seg.monthlyRevenue) || 0) * 12; }, 0);
+  if (segments.length > 0 && segSum > 0) return Math.round(segSum * 100) / 100;
+  return (extraction.revenue && extraction.revenue.annualTotal) || 0;
+}
+
+function deriveDirectCosts(extraction) {
+  var cogsLines = (extraction.cogs && extraction.cogs.lineItems) || [];
+  var cogsLineSum = cogsLines.reduce(function (s, li) { return s + (Number(li.monthlyAmount) || 0) * 12; }, 0);
+  var staffingAnnual = (extraction.staffingBuildUp && extraction.staffingBuildUp.annualTotal) || 0;
+  var itemizedTotal = cogsLineSum + staffingAnnual;
+  var hasItemized = cogsLines.length > 0 || staffingAnnual > 0;
+  if (hasItemized) return Math.round(itemizedTotal * 100) / 100;
+  return (extraction.cogs && extraction.cogs.annualTotal) || 0;
+}
+
+function deriveOpex(extraction) {
+  var opexLines = (extraction.opex && extraction.opex.lineItems) || [];
+  var opexLineSum = opexLines.reduce(function (s, li) { return s + (Number(li.monthlyAmount) || 0) * 12; }, 0);
+  if (opexLines.length > 0 && opexLineSum > 0) return Math.round(opexLineSum * 100) / 100;
+  return (extraction.opex && extraction.opex.annualTotal) || 0;
+}
+
 export function computeModel(extraction) {
   if (!extraction) return null;
-  var rev = (extraction.revenue && extraction.revenue.annualTotal) || 0;
-  var cogs = (extraction.cogs && extraction.cogs.annualTotal) || 0;
-  var opex = (extraction.opex && extraction.opex.annualTotal) || 0;
+  var rev = deriveRevenue(extraction);
+  var cogs = deriveDirectCosts(extraction);
+  var opex = deriveOpex(extraction);
   var assets = extraction.assets || {};
   var grossBlock = Object.keys(assets).reduce(function (s, k) { return s + (assets[k] || 0); }, 0);
   var dep = Object.keys(DEP_RATES).reduce(function (s, k) { return s + (assets[k] || 0) * DEP_RATES[k]; }, 0);
