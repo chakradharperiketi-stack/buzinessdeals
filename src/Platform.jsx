@@ -489,7 +489,21 @@ function clearPlatformState(sessionId) {
 }
 
 export default function Platform({ user, sessionId, onSignOut }) {
-  var persisted = loadPlatformState(sessionId) || {};
+  var currentOwnerId = user && user.id ? user.id : null;
+  var rawPersisted = loadPlatformState(sessionId);
+  // Cross-account data leak fix (see chat, 5 Sept 2026): App.jsx's sessionId
+  // is generated once per BROWSER and never regenerated, but this state is
+  // keyed only by sessionId - so on a shared browser, a second account
+  // logging in used to seed its very first render straight from whatever
+  // the FIRST account's Platform last saved here: their AI Financial Model,
+  // their in-progress valuation form, all of it. Only ever trust a saved
+  // blob when it was saved by nobody yet (ownerId null - the legitimate
+  // anonymous-chat-then-sign-up handoff App.jsx's SIGNED_IN transfer exists
+  // for) or by THIS SAME authenticated user. A different real account's
+  // leftover state is discarded outright, same as if nothing had ever been
+  // saved - the [user && user.id] effect below then repopulates everything
+  // correctly, server-side, scoped to whoever is actually logged in.
+  var persisted = (rawPersisted && (rawPersisted.ownerId == null || rawPersisted.ownerId === currentOwnerId)) ? rawPersisted : {};
   var convPhaseSt = useState(persisted.convPhase || 'discovery'), convPhase = convPhaseSt[0], setConvPhase = convPhaseSt[1];
   var convExtractionSt = useState(persisted.convExtraction || {}), convExtraction = convExtractionSt[0], setConvExtraction = convExtractionSt[1];
   var convModelSt = useState(persisted.convModel || null), convModel = convModelSt[0], setConvModel = convModelSt[1];
@@ -732,6 +746,30 @@ export default function Platform({ user, sessionId, onSignOut }) {
       .then(function (project) {
         if (cancelled || !project) return;
         setProjectId(project.id);
+        // Bridge the "signed in mid-chat" gap (see chat, 5 Sept 2026):
+        // App.jsx's SIGNED_IN handler transfers user_id onto this browser's
+        // anonymous ai_conversations row (matched by session_id) the
+        // moment login completes, but it never touches project_id - and
+        // the project picked/created just above comes from the `projects`
+        // table, which that anonymous row was never linked to. Left alone
+        // the two never meet: the conversation the user was mid-interview
+        // on a second ago sits in a project_id-null row forever, invisible
+        // to loadProjectData's project_id-scoped query below, and their
+        // chat reopens as a blank greeting instead of continuing. Link it
+        // to this account's active project before loading - same "don't
+        // lose a real conversation to a filing gap" principle as
+        // backfill_projects.sql. No-op (0 rows) for a normal returning
+        // login with nothing anonymous left to claim.
+        return supabase.from('ai_conversations')
+          .update({ project_id: project.id })
+          .eq('session_id', sessionId)
+          .eq('user_id', user.id)
+          .is('project_id', null)
+          .then(function () { return project; })
+          .catch(function () { return project; });
+      })
+      .then(function (project) {
+        if (cancelled || !project) return;
         return loadProjectData(project.id);
       })
       .catch(function () {
@@ -761,9 +799,13 @@ export default function Platform({ user, sessionId, onSignOut }) {
   // Persist on every change so a remount (tab switch/away-and-back, preview
   // reload) restores the panel instead of resetting to Home.
   useEffect(function () {
-    savePlatformState(sessionId, { convPhase: convPhase, convExtraction: convExtraction, convModel: convModel, brief: brief, sellerForm: sellerForm, selEngId: selEngId, report: report });
+    // ownerId travels with the saved blob so the next load (this account,
+    // a different account, or back to anonymous) can tell whose data this
+    // actually is - see the read side in Platform's own top-of-function
+    // comment for why that check exists.
+    savePlatformState(sessionId, { ownerId: currentOwnerId, convPhase: convPhase, convExtraction: convExtraction, convModel: convModel, brief: brief, sellerForm: sellerForm, selEngId: selEngId, report: report });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, convPhase, convExtraction, convModel, brief, sellerForm, selEngId, report]);
+  }, [sessionId, currentOwnerId, convPhase, convExtraction, convModel, brief, sellerForm, selEngId, report]);
 
   var isAdmin = !!(user && user.email && ADMIN_EMAILS.indexOf(user.email.toLowerCase()) !== -1);
 
