@@ -13,6 +13,20 @@
 const AI_SEARCH_URL = import.meta.env.VITE_AI_SEARCH_URL || 'https://mpjxulzllmmoiqaqwart.supabase.co/functions/v1/ai-search';
 const ANON_KEY = 'sb_publishable_0Xkatb8dUNbdP44AWek6Hg_Br4SNyf2';
 
+// Plain fetch has no default timeout - a degraded connection (flaky wifi,
+// a network handoff, a captive portal) that doesn't cleanly refuse the
+// connection can leave this Promise pending far longer than anyone would
+// wait, sometimes indefinitely. Meanwhile ConversationEngine's sendingRef
+// stays true the whole time (only its .then/.catch clears it), silently
+// blocking every retry attempt with no visible reason why - reported as
+// "an interview stalls mid-way after a connection blip and never recovers,
+// retyping the same message does nothing" (see chat, 5 Sept 2026). An
+// explicit abort turns an indefinite hang into a real rejection, which
+// ConversationEngine's existing .catch already resets state and shows a
+// message for - so a stalled request becomes a normal, retryable failure
+// instead of a silent dead end.
+const REQUEST_TIMEOUT_MS = 45000;
+
 export async function callAiSearch({
   message,
   history = [],
@@ -29,27 +43,41 @@ export async function callAiSearch({
   priorModel = null,
   priorBrief = null,
 }) {
-  const res = await fetch(AI_SEARCH_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: ANON_KEY,
-      Authorization: 'Bearer ' + ANON_KEY,
-    },
-    body: JSON.stringify({
-      message,
-      history,
-      userContext,
-      sessionId,
-      userId,
-      projectId,
-      conversationPhase,
-      exchangeCount,
-      priorExtraction,
-      priorModel,
-      priorBrief,
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS);
+
+  let res;
+  try {
+    res = await fetch(AI_SEARCH_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: ANON_KEY,
+        Authorization: 'Bearer ' + ANON_KEY,
+      },
+      body: JSON.stringify({
+        message,
+        history,
+        userContext,
+        sessionId,
+        userId,
+        projectId,
+        conversationPhase,
+        exchangeCount,
+        priorExtraction,
+        priorModel,
+        priorBrief,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      throw new Error('ai-search request timed out after ' + (REQUEST_TIMEOUT_MS / 1000) + 's - likely a network interruption');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!res.ok) {
     throw new Error('ai-search request failed: ' + res.status);
