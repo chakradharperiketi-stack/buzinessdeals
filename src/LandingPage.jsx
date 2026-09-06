@@ -1,1145 +1,1041 @@
-import { useState, useEffect } from 'react';
-import { ValuationPlatform, CreateListingModal } from './ValuationPlatform';
-import ConversationEngine from './ConversationEngine';
-import FinancialModelPanel, { computeCompletionPct } from './FinancialModelPanel';
-import AcquisitionBriefPanel from './AcquisitionBriefPanel';
-import BuyerListingsPanel from './BuyerListingsPanel';
-import AdminPortal from './AdminPortal';
-import { computeModel } from './lib/financialModel';
-import { buildV3FormFromModel } from './lib/v3FormMapper';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from './supabase';
+import AuthModal from './AuthModal';
+import { callAiSearch, stripTags } from './lib/aiSearch';
+import { sendNotification } from './lib/notifications';
+import { SAMPLE_LISTINGS } from './lib/sampleListings';
 
-// Admin detection is by email only - never call any Supabase admin API from
-// the frontend (critical rule #8).
-var ADMIN_EMAILS = ['zeniusadvisors@gmail.com', 'chakradhar@vkcorpca.com', 'chakri@buzinessdeals.com'];
+var MAX_ANON_EXCHANGES = 5;
+var PHONE = '+91-8008543377';
+var EMAIL = 'contact@buzinessdeals.com';
 
-var ACTION_CARDS = [
-  { key: 'listings', icon: 'ti-search', color: '#2563eb', title: 'Browse or Invest', desc: 'Explore verified listings matched to your budget and sector.' },
-  { key: 'analyst', icon: 'ti-message-chatbot', color: '#7c3aed', title: 'Sell or Raise Capital', desc: 'A guided AI interview builds your financial model (P&L) first - Rs. 1,500, pay after it’s built - then carries into your listing or valuation.' },
-  // Direct, no-interview path (see CreateListingModal, imported from
-  // ValuationPlatform.jsx) - already-know-your-numbers sellers can submit a
-  // listing straight away. It ships self-reported (muted badge, not the
-  // green "Verified" one) - the AI Financial Model remains the way to a
-  // Verified badge, pitched to the user right after they submit.
-  { key: 'directListing', icon: 'ti-building-store', color: '#16a34a', title: 'List Your Business', desc: 'Already know your numbers? Submit a listing directly for review - no interview needed. Self-reported, not Verified.' },
-  { key: 'valuation', icon: 'ti-chart-line', color: '#2563eb', title: 'Valuation Report', desc: 'A full DCF valuation using Damodaran India data - from Rs. 2,000.' },
+var SUGGESTED_PROMPTS = [
+  'What is my business worth?',
+  'Show me businesses for sale in Hyderabad',
+  'I want to invest 2 crore',
+  'I need a FEMA valuation',
+  'How does this platform work?',
 ];
 
-function NavBar({ user, isAdmin, onHome, onGoListings, onGoBusinesses, onGoAdmin, onSignOut }) {
-  var menuSt = useState(false), menuOpen = menuSt[0], setMenuOpen = menuSt[1];
-  var initial = (user && user.email ? user.email[0] : '?').toUpperCase();
+var TRUST_BADGES = [
+  { title: 'Damodaran India', sub: 'Valuation methodology' },
+  { title: 'Minutes not weeks', sub: 'Report delivery' },
+  { title: 'CA-grade tools', sub: 'Platform' },
+  { title: 'Zenius Advisors', sub: 'Advisory' },
+];
 
+// Pathway 1 (direct discovery) categories - clicking one both filters the
+// grid and seeds the AI conversation with context, per spec section 2.
+var DISCOVERY_CATEGORIES = [
+  { key: 'Manufacturing', label: 'Manufacturing Businesses', icon: 'ti-building-factory' },
+  { key: 'Restaurant', label: 'Restaurants', icon: 'ti-tools-kitchen-2' },
+  { key: 'Technology', label: 'Technology Companies', icon: 'ti-device-laptop' },
+  { key: 'Healthcare', label: 'Healthcare Businesses', icon: 'ti-stethoscope' },
+  { key: null, label: 'Available for Acquisition', icon: 'ti-briefcase' },
+];
+
+var FALLBACK_PRICING = [
+  { id: 'ai_model', name: 'AI Financial Model', subtitle: 'Full P&L built from your operations', current_price: 1500, period: 'one-time', features: ['13-question guided interview', '5-year projection', 'Feeds directly into your valuation'], cta_text: 'Start free interview', sort_order: 1 },
+  { id: 'valuation', name: 'Valuation Report', subtitle: 'DCF valuation with Damodaran India data', current_price: 3500, period: 'one-time', badge: 'Rs. 2,000 if model already built', features: ['9-section valuation engine', 'WACC, DCF, sensitivity analysis', 'Downloadable report'], cta_text: 'Get a valuation', is_popular: true, sort_order: 2 },
+  { id: 'excel', name: 'Excel with live formulas', subtitle: 'Add-on to any valuation report', current_price: 1500, period: 'add-on', features: ['Fully editable model', 'Live DCF formulas', 'Share with your own advisors'], cta_text: 'Add to report', sort_order: 3 },
+  { id: 'expert_review', name: 'Expert CA Review', subtitle: 'A Chartered Accountant reviews your numbers', current_price: 25000, period: 'one-time', features: ['Senior CA sign-off', 'Statutory-grade rigor', 'No payment required to enquire'], cta_text: 'Talk to a CA', sort_order: 4 },
+  { id: 'verified_listing', name: 'Verified Listing', subtitle: '90-day featured placement', current_price: 12000, period: 'per 90 days', features: ['Verified badge', 'Priority placement', 'Included valuation summary'], cta_text: 'List your business', sort_order: 5 },
+  { id: 'ca_subscription', name: 'CA Firm Subscription', subtitle: 'For CA and CS firms', current_price: 60000, period: 'per year', features: ['Unlimited client valuations', 'White-labelled reports', 'Priority support'], cta_text: 'Enquire', is_coming_soon: true, sort_order: 6 },
+];
+
+var LISTING_PACKAGE_IDS = ['verified_listing', 'ca_subscription'];
+
+function formatINR(lakhs) {
+  if (lakhs == null || isNaN(lakhs)) return '--';
+  if (lakhs >= 100) return 'Rs. ' + (lakhs / 100).toFixed(1).replace(/\.0$/, '') + ' Cr';
+  return 'Rs. ' + Math.round(lakhs) + ' L';
+}
+
+function verificationBadge(status) {
+  if (status === 'expert_verified') return { label: 'Expert Verified', color: '#1d4ed8', bg: '#dbeafe', border: '#93c5fd' };
+  if (status === 'verified') return { label: 'Verified', color: '#16a34a', bg: '#dcfce7', border: '#86efac' };
+  return { label: 'Self-reported', color: '#92400e', bg: '#fef3c7', border: '#fcd34d' };
+}
+
+// --- LISTING CARD ---
+function ListingCard(props) {
+  var l = props.listing;
+  var badge = verificationBadge(l.verification_status);
+  var margin = l.ebitda_margin_pct != null ? l.ebitda_margin_pct : (l.revenue_lakhs ? Math.round((l.ebitda_lakhs / l.revenue_lakhs) * 100) : null);
   return (
-    <div style={{
-      height: '48px', background: '#1a2332', display: 'flex', alignItems: 'center',
-      justifyContent: 'space-between', padding: '0 16px', flexShrink: 0, position: 'relative', zIndex: 50,
+    <div onClick={function () { props.onClick(l); }} style={{
+      background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '12px',
+      padding: '18px', cursor: 'pointer', boxShadow: 'var(--shadow-sm)',
     }}>
-      <button onClick={onHome} style={{
-        display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
-      }}>
-        <div style={{ width: '26px', height: '26px', borderRadius: '7px', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <span style={{ fontSize: '12px', fontWeight: '700', color: '#fff' }}>BD</span>
-        </div>
-        <span style={{ fontSize: '13px', fontWeight: '600', color: '#fff' }}>buzinessdeals.com</span>
-      </button>
-
-      {/* "Browse listings" used to be a third flex child alongside the logo
-          and the avatar, so justify-content:space-between put it dead
-          center of the whole bar - visually stranded, not associated with
-          either side. Grouping it with the avatar under one right-aligned
-          flex container puts space-between back to its intended two groups
-          (logo | everything else), landing this button naturally beside the
-          profile menu instead of floating in the middle of the page. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <button onClick={onGoListings} style={{
-          background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff',
-          fontSize: '12px', padding: '6px 14px', borderRadius: '7px', cursor: 'pointer',
-        }}>Browse listings</button>
-
-        <div style={{ position: 'relative' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {isAdmin && (
-              <span style={{
-                fontSize: '10px', fontWeight: '600', color: '#92400e', background: '#fcd34d',
-                padding: '2px 8px', borderRadius: '999px',
-              }}>Admin</span>
-            )}
-            <button onClick={function () { setMenuOpen(!menuOpen); }} style={{
-              width: '28px', height: '28px', borderRadius: '50%', background: '#2563eb', color: '#fff',
-              border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '600',
-            }}>{initial}</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px', gap: '8px' }}>
+        <div>
+          <h3 style={{ fontSize: '14px', fontWeight: '600', margin: '0 0 6px', color: 'var(--text-primary)' }}>{l.business_name}</h3>
+          <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: 'var(--surface-1)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>{l.sector}</span>
+            <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: 'var(--surface-1)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>{l.city}{l.state ? ', ' + l.state : ''}</span>
+            {l.years_in_operation ? <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: 'var(--surface-1)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>{l.years_in_operation} yrs</span> : null}
           </div>
-          {menuOpen && (
-          <div style={{
-            position: 'absolute', right: 0, top: '38px', background: '#fff', borderRadius: '10px',
-            boxShadow: '0 12px 32px rgba(0,0,0,0.2)', minWidth: '230px', overflow: 'hidden', border: '1px solid var(--border)',
-          }}>
-            <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
-              <p style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {(user && user.email) || 'Account'}
-              </p>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0 }}>{isAdmin ? 'Admin' : 'Member'}</p>
-            </div>
-            {/* Real, working destinations - each backed by data and a UI that
-                already exists (Home = discovery screen, My Businesses = the
-                project list on that same screen, forced open). */}
-            {[
-              { label: 'Home', icon: 'ti-home', action: onHome },
-              { label: 'My Businesses', icon: 'ti-building', action: onGoBusinesses },
-            ].concat(isAdmin ? [{ label: 'Admin Portal', icon: 'ti-shield-lock', action: onGoAdmin }] : []).map(function (item) {
-              return (
-                <button key={item.label} onClick={function () { setMenuOpen(false); item.action(); }} style={{
-                  display: 'flex', alignItems: 'center', gap: '10px', width: '100%', textAlign: 'left', padding: '10px 14px',
-                  background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', fontSize: '13px',
-                  color: 'var(--text-primary)', cursor: 'pointer',
-                }}>
-                  <i className={'ti ' + item.icon} aria-hidden="true" style={{ fontSize: '15px', color: 'var(--text-muted)' }} />
-                  {item.label}
-                </button>
-              );
-            })}
-            {/* Not built yet - no engagements list, interests list, or
-                profile/admin screen exists anywhere in the app to route to.
-                These used to silently call onHome() instead, which looked
-                identical to the button doing nothing. Shown disabled with a
-                "Soon" tag instead, so the gap is honest rather than hidden. */}
-            {[
-              { label: 'My Engagements', icon: 'ti-clipboard-list' },
-              { label: 'My Interests', icon: 'ti-heart' },
-              { label: 'Profile & Settings', icon: 'ti-user-cog' },
-            ].map(function (item) {
-              return (
-                <div key={item.label} title="Coming soon" style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', width: '100%',
-                  padding: '10px 14px', borderBottom: '1px solid var(--border)', fontSize: '13px', color: 'var(--text-muted)',
-                  cursor: 'default', opacity: 0.65,
-                }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <i className={'ti ' + item.icon} aria-hidden="true" style={{ fontSize: '15px', color: 'var(--text-muted)' }} />
-                    {item.label}
-                  </span>
-                  <span style={{
-                    fontSize: '9px', fontWeight: '700', color: 'var(--text-muted)', background: 'var(--surface-2)',
-                    padding: '2px 6px', borderRadius: '999px', textTransform: 'uppercase', letterSpacing: '0.03em',
-                  }}>Soon</span>
-                </div>
-              );
-            })}
-            <button onClick={function () { setMenuOpen(false); onSignOut(); }} style={{
-              display: 'flex', alignItems: 'center', gap: '10px', width: '100%', textAlign: 'left', padding: '10px 14px',
-              background: 'transparent', border: 'none', fontSize: '13px', color: 'var(--text-danger)', cursor: 'pointer',
-            }}>
-              <i className="ti ti-logout" aria-hidden="true" style={{ fontSize: '15px' }} />
-              Sign out
-            </button>
-          </div>
-        )}
         </div>
+        <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: badge.bg, color: badge.color, border: '0.5px solid ' + badge.border, fontWeight: '500', whiteSpace: 'nowrap' }}>{badge.label}</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '10px' }}>
+        <div style={{ padding: '6px 8px', background: 'var(--surface-1)', borderRadius: '6px' }}>
+          <p style={{ fontSize: '9px', color: 'var(--text-muted)', margin: '0 0 1px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Revenue</p>
+          <p style={{ fontSize: '12px', fontWeight: '500', margin: 0, color: 'var(--text-primary)' }}>{formatINR(l.revenue_lakhs)}</p>
+        </div>
+        <div style={{ padding: '6px 8px', background: 'var(--surface-1)', borderRadius: '6px' }}>
+          <p style={{ fontSize: '9px', color: 'var(--text-muted)', margin: '0 0 1px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Asking price</p>
+          <p style={{ fontSize: '12px', fontWeight: '600', margin: 0, color: 'var(--text-accent)' }}>{formatINR(l.asking_price_lakhs)}</p>
+        </div>
+        <div style={{ padding: '6px 8px', background: 'var(--surface-1)', borderRadius: '6px' }}>
+          <p style={{ fontSize: '9px', color: 'var(--text-muted)', margin: '0 0 1px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>EBITDA margin</p>
+          <p style={{ fontSize: '12px', fontWeight: '500', margin: 0, color: 'var(--text-primary)' }}>{margin != null ? margin + '%' : '--'}</p>
+        </div>
+        <div style={{ padding: '6px 8px', background: 'var(--surface-1)', borderRadius: '6px' }}>
+          <p style={{ fontSize: '9px', color: 'var(--text-muted)', margin: '0 0 1px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>EBITDA</p>
+          <p style={{ fontSize: '12px', fontWeight: '500', margin: 0, color: 'var(--text-primary)' }}>{formatINR(l.ebitda_lakhs)}</p>
+        </div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <span style={{ fontSize: '11px', color: 'var(--text-accent)', fontWeight: '500' }}>View details →</span>
       </div>
     </div>
   );
 }
 
-function projectStatusLabel(status) {
-  if (status === 'model_complete') return 'Model complete';
-  if (status === 'listed') return 'Listed';
-  if (status === 'archived') return 'Archived';
-  return 'Draft';
-}
-function relativeTime(iso) {
-  if (!iso) return '';
-  var diffMs = Date.now() - new Date(iso).getTime();
-  var mins = Math.round(diffMs / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return mins + 'm ago';
-  var hrs = Math.round(mins / 60);
-  if (hrs < 24) return hrs + 'h ago';
-  return Math.round(hrs / 24) + 'd ago';
-}
-
-var STATUS_COLORS = { draft: '#64748b', model_complete: '#16a34a', listed: '#2563eb', archived: '#94a3b8' };
-
-function BusinessRow({ p, isActive, hasDraft, activePct, switchingProject, onOpen, onArchive, onDelete, isEditing, onStartEdit, onRename, onCancelEdit }) {
-  var color = STATUS_COLORS[p.status] || STATUS_COLORS.draft;
-  var nameInputSt = useState(p.name), nameInput = nameInputSt[0], setNameInput = nameInputSt[1];
-
-  function commitRename() {
-    var trimmed = nameInput.trim();
-    onRename(trimmed || p.name); // empty input just cancels back to the existing name, never blanks it
-  }
-
-  if (isEditing) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 12px', borderBottom: '1px solid var(--border)', background: 'var(--surface-1)' }}>
-        <input autoFocus value={nameInput} onChange={function (e) { setNameInput(e.target.value); }}
-          onKeyDown={function (e) { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') onCancelEdit(); }}
-          onBlur={commitRename}
-          style={{ flex: 1, fontSize: '13px', padding: '5px 8px', borderRadius: '6px', border: '1px solid var(--border-accent)', background: 'var(--surface-0)', color: 'var(--text-primary)' }}
-        />
-        <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Enter to save</span>
-      </div>
-    );
-  }
-
+// --- LISTING DETAIL MODAL (paywall gate, with the AI handoff kept as a
+// secondary path - the richer feature this session already built) ---
+function ListingDetailModal(props) {
+  var l = props.listing;
+  var badge = verificationBadge(l.verification_status);
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
-      padding: '9px 12px', borderBottom: '1px solid var(--border)',
-      background: isActive ? 'var(--bg-accent)' : 'transparent',
-    }}>
-      <button disabled={switchingProject} onClick={onOpen} style={{
-        flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '10px', textAlign: 'left',
-        background: 'transparent', border: 'none', cursor: switchingProject ? 'default' : 'pointer', padding: 0,
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }} onClick={props.onClose}>
+      <div onClick={function (e) { e.stopPropagation(); }} style={{
+        background: 'var(--surface-2)', borderRadius: '16px', padding: '28px', maxWidth: '460px', width: '100%',
+        boxShadow: '0 24px 64px rgba(0,0,0,0.35)', maxHeight: '90vh', overflowY: 'auto',
       }}>
-        <span style={{
-          fontSize: '10px', fontWeight: '700', padding: '2px 8px', borderRadius: '999px', flexShrink: 0,
-          background: color + '1a', color: color, whiteSpace: 'nowrap',
-        }}>{projectStatusLabel(p.status)}</span>
-        <span style={{
-          fontSize: '13px', fontWeight: isActive ? '600' : '500', color: isActive ? 'var(--text-accent)' : 'var(--text-primary)',
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-        }}>{p.name}{isActive ? ' · Active' : ''}{isActive && hasDraft ? ' (' + activePct + '%)' : ''}</span>
-      </button>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-        <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{relativeTime(p.updated_at)}</span>
-        <button title="Rename" onClick={function (e) { e.stopPropagation(); setNameInput(p.name); onStartEdit(); }} disabled={switchingProject} style={{
-          background: 'transparent', border: 'none', cursor: switchingProject ? 'default' : 'pointer', color: 'var(--text-muted)', padding: '2px', display: 'flex',
-        }}>
-          <i className="ti ti-pencil" aria-hidden="true" style={{ fontSize: '14px' }} />
-        </button>
-        {onArchive && (
-          <button title="Archive" onClick={onArchive} disabled={switchingProject} style={{
-            background: 'transparent', border: 'none', cursor: switchingProject ? 'default' : 'pointer',
-            color: 'var(--text-muted)', padding: '2px', display: 'flex',
-          }}>
-            <i className="ti ti-archive" aria-hidden="true" style={{ fontSize: '14px' }} />
-          </button>
-        )}
-        {onDelete && (
-          <button title="Delete permanently" onClick={onDelete} disabled={switchingProject} style={{
-            background: 'transparent', border: 'none', cursor: switchingProject ? 'default' : 'pointer',
-            color: '#dc2626', padding: '2px', display: 'flex',
-          }}>
-            <i className="ti ti-trash" aria-hidden="true" style={{ fontSize: '14px' }} />
-          </button>
-        )}
-        <button disabled={switchingProject} onClick={onOpen} style={{ background: 'transparent', border: 'none', cursor: switchingProject ? 'default' : 'pointer', padding: '2px', display: 'flex' }}>
-          <i className="ti ti-arrow-right" aria-hidden="true" style={{ fontSize: '14px', color: isActive ? 'var(--text-accent)' : 'var(--text-muted)' }} />
-        </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+          <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: badge.bg, color: badge.color, border: '0.5px solid ' + badge.border, fontWeight: '500' }}>{badge.label}</span>
+          <button onClick={props.onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '16px', color: 'var(--text-muted)' }}>✕</button>
+        </div>
+        <h3 style={{ fontSize: '17px', fontWeight: '600', margin: '10px 0 4px', color: 'var(--text-primary)' }}>{l.business_name}</h3>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 16px' }}>
+          {l.sector} · {l.city}{l.state ? ', ' + l.state : ''}{l.years_in_operation ? ' · ' + l.years_in_operation + ' years' : ''}
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '18px' }}>
+          <div>
+            <p style={{ fontSize: '10px', color: 'var(--text-muted)', margin: '0 0 2px' }}>Revenue</p>
+            <p style={{ fontSize: '14px', fontWeight: '600', margin: 0, color: 'var(--text-primary)' }}>{formatINR(l.revenue_lakhs)}</p>
+          </div>
+          <div>
+            <p style={{ fontSize: '10px', color: 'var(--text-muted)', margin: '0 0 2px' }}>EBITDA</p>
+            <p style={{ fontSize: '14px', fontWeight: '600', margin: 0, color: 'var(--text-primary)' }}>{formatINR(l.ebitda_lakhs)}</p>
+          </div>
+          <div>
+            <p style={{ fontSize: '10px', color: 'var(--text-muted)', margin: '0 0 2px' }}>Asking</p>
+            <p style={{ fontSize: '14px', fontWeight: '600', margin: 0, color: 'var(--text-accent)' }}>{formatINR(l.asking_price_lakhs)}</p>
+          </div>
+        </div>
+        <div style={{ padding: '14px', background: 'var(--bg-accent)', borderRadius: '10px', border: '1px solid var(--border)', marginBottom: '16px', textAlign: 'center' }}>
+          <i className="ti ti-lock" aria-hidden="true" style={{ fontSize: '18px', color: 'var(--text-accent)', marginBottom: '8px', display: 'block' }} />
+          <p style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text-primary)', margin: '0 0 4px' }}>Create a free account for full details</p>
+          <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '0 0 12px' }}>Exact financials, valuation report and a direct introduction — after a quick qualification.</p>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button onClick={props.onSignup} style={{ flex: 1, padding: '10px', borderRadius: '8px', fontSize: '13px', fontWeight: '500', cursor: 'pointer', background: '#2563eb', color: '#fff', border: 'none' }}>Create free account</button>
+            <button onClick={props.onLogin} style={{ flex: 1, padding: '10px', borderRadius: '8px', fontSize: '13px', fontWeight: '500', cursor: 'pointer', background: 'transparent', color: 'var(--text-accent)', border: '1.5px solid var(--text-accent)' }}>Sign in</button>
+          </div>
+        </div>
+        <button onClick={props.onAskAi} style={{
+          width: '100%', padding: '11px', borderRadius: '8px', fontSize: '13px', fontWeight: '500',
+          background: 'transparent', color: 'var(--text-accent)', border: '1.5px solid var(--border)', cursor: 'pointer',
+        }}>Or ask the AI advisor about this business →</button>
       </div>
     </div>
   );
 }
 
-function HomeScreen({ onCard, loadingKey, report, convExtraction, convModel, projectId, projectsList, onSwitchProject, onNewProject, onArchiveProject, onUnarchiveProject, onRenameProject, onDeleteProject, autoEditProjectId, onAutoEditConsumed, switchingProject, forceBusinessPanel }) {
-  var hour = new Date().getHours();
-  var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-  var showArchivedSt = useState(false), showArchived = showArchivedSt[0], setShowArchived = showArchivedSt[1];
-  var editingIdSt = useState(null), editingId = editingIdSt[0], setEditingId = editingIdSt[1];
-  // A newly-created business needs to actually be earmarked, not left as
-  // "Untitled Business" indefinitely - this opens the rename field on it
-  // automatically right after creation (skippable - clicking away just
-  // keeps the default name, this isn't a hard-blocking prompt).
-  useEffect(function () {
-    if (autoEditProjectId) {
-      setEditingId(autoEditProjectId);
-      onAutoEditConsumed && onAutoEditConsumed();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoEditProjectId]);
-  // Resume affordance - without this, a returning user with a saved
-  // interview/model/report in progress has no way to know it, and lands on
-  // the same blank 3-card picker as a brand-new visitor every time.
-  var hasExtraction = !!(convExtraction && Object.keys(convExtraction).length > 0);
-  var hasDraft = !!(report || convModel || hasExtraction);
-  var activePct = hasDraft ? computeCompletionPct(convModel || convExtraction) : 0;
-  var allProjects = projectsList || [];
-  var liveProjects = allProjects.filter(function (p) { return p.status !== 'archived'; });
-  var archivedProjects = allProjects.filter(function (p) { return p.status === 'archived'; });
-  // Stays a single quiet row for the common one-project case; upgrades to
-  // the full list the moment there's more than one, or once there's a New
-  // Business action worth surfacing (something exists on the current one to
-  // branch off from). Capped height below, not unbounded growth - the
-  // panel's footprint stays fixed no matter how many businesses accumulate.
-  var showBusinessPanel = hasDraft || liveProjects.length > 1 || !!forceBusinessPanel;
-
+// --- NAV BAR ---
+function NavBar(props) {
   return (
-    <div style={{ padding: '32px', maxWidth: '760px', margin: '0 auto' }}>
-      <h1 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 4px' }}>{greeting}.</h1>
-      <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 28px' }}>What would you like to do today?</p>
+    <nav style={{
+      background: '#1a2332', padding: '14px 24px', display: 'flex', alignItems: 'center',
+      justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100, flexWrap: 'wrap', gap: '12px',
+    }}>
+      <button onClick={props.onLogoClick} style={{
+        display: 'flex', alignItems: 'center', gap: '10px', background: 'transparent',
+        border: 'none', padding: 0, margin: 0, cursor: 'pointer', textAlign: 'left',
+      }}>
+        <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ fontSize: '14px', fontWeight: '700', color: '#fff' }}>BD</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span style={{ fontSize: '15px', fontWeight: '600', color: '#fff', lineHeight: '1.1' }}>BuzinessDeals</span>
+          <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', lineHeight: '1.1' }}>by Zenius Advisors</span>
+        </div>
+      </button>
+      <div style={{ display: 'flex', gap: '22px', alignItems: 'center' }} className="bd-nav-links">
+        <a href="#listings" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>Browse listings</a>
+        <a href="#for-sellers" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>For sellers</a>
+        <a href="#for-buyers" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>For buyers</a>
+        <a href="#for-investors" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>For investors</a>
+        <a href="#professional-tools" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>AI model & valuation</a>
+        <a href="#pricing" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>Pricing</a>
+        <a href="#contact" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '13px', textDecoration: 'none' }}>Contact us</a>
+      </div>
+      <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }} className="bd-nav-contact">
+          <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)', lineHeight: '1.2' }}>{PHONE}</span>
+          <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)', lineHeight: '1.2' }}>{EMAIL}</span>
+        </div>
+        <button onClick={props.onSignIn} style={{
+          background: 'transparent', border: '1px solid rgba(255,255,255,0.25)', color: '#fff',
+          padding: '8px 16px', borderRadius: '8px', fontSize: '13px', cursor: 'pointer',
+        }}>Sign in</button>
+        <button onClick={props.onGetStarted} style={{
+          background: '#2563eb', border: 'none', color: '#fff', padding: '8px 16px',
+          borderRadius: '8px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
+        }}>Get started</button>
+      </div>
+    </nav>
+  );
+}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginBottom: showBusinessPanel ? '28px' : 0 }}>
-        {ACTION_CARDS.map(function (c) {
-          var isLoading = loadingKey === c.key;
+// --- FOR SECTION ---
+function ForSection() {
+  var cols = [
+    { id: 'for-sellers', icon: 'ti-building-store', title: 'For Sellers', desc: 'List your business with a professional valuation. Get matched with qualified buyers who are pre-screened.' },
+    { id: 'for-buyers', icon: 'ti-search', title: 'For Buyers', desc: 'Browse verified listings with DCF valuations. Get professionally qualified and receive curated introductions.' },
+    { id: 'for-cas', icon: 'ti-file-certificate', title: 'For CAs and Advisors', desc: 'Use the valuation tool for client engagements. Generate professional DCF reports with Damodaran India data.' },
+  ];
+  return (
+    <section style={{ padding: '48px 24px', maxWidth: '1180px', margin: '0 auto' }}>
+      <h2 style={{ fontSize: '22px', fontWeight: '700', color: 'var(--text-primary)', textAlign: 'center', margin: '0 0 32px' }}>Built for every side of the deal</h2>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '20px' }}>
+        {cols.map(function (col) {
           return (
-            <button key={c.key} disabled={isLoading} onClick={function () { onCard(c.key); }} style={{
-              textAlign: 'left', padding: '20px', borderRadius: '14px', border: '1px solid var(--border)',
-              background: 'var(--surface-2)', cursor: isLoading ? 'default' : 'pointer', boxShadow: 'var(--shadow-sm)',
-              opacity: isLoading ? 0.6 : 1,
-            }}>
-              <div style={{
-                width: '38px', height: '38px', borderRadius: '10px', background: c.color + '1a',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px',
-              }}>
-                <i className={'ti ' + (isLoading ? 'ti-loader-2' : c.icon)} aria-hidden="true" style={{ fontSize: '18px', color: c.color }} />
+            <div key={col.title} id={col.id} style={{ padding: '28px 22px', borderRadius: '14px', border: '1px solid var(--border)', background: 'var(--surface-2)', scrollMarginTop: '80px' }}>
+              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'var(--bg-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
+                <i className={'ti ' + col.icon} aria-hidden="true" style={{ fontSize: '20px', color: 'var(--text-accent)' }} />
               </div>
-              <p style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 4px' }}>{c.title}</p>
-              <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.55' }}>{isLoading ? 'Loading…' : c.desc}</p>
-            </button>
+              <h3 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 8px' }}>{col.title}</h3>
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6', margin: 0 }}>{col.desc}</p>
+            </div>
           );
         })}
       </div>
+    </section>
+  );
+}
 
-      {showBusinessPanel && (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <p style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-muted)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Your businesses</p>
-            {onNewProject && (
-              <button onClick={onNewProject} disabled={switchingProject} style={{
-                fontSize: '12px', fontWeight: '600', color: 'var(--text-accent)', background: 'transparent', border: 'none',
-                cursor: switchingProject ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: '4px', padding: 0,
-              }}>
-                <i className="ti ti-plus" aria-hidden="true" style={{ fontSize: '13px' }} /> New Business
-              </button>
-            )}
-          </div>
-          {/* Bounded height + scroll, not unbounded growth - this is the
-              whole fix for "the more business I add, cards go further
-              down": the panel's footprint stops growing past ~5 rows
-              regardless of how many businesses the account has. */}
-          <div style={{ border: '1px solid var(--border)', borderRadius: '12px', maxHeight: '260px', overflowY: 'auto' }}>
-            {liveProjects.map(function (p) {
-              var isActive = p.id === projectId;
-              return (
-                <BusinessRow key={p.id} p={p} isActive={isActive} hasDraft={hasDraft} activePct={activePct} switchingProject={switchingProject}
-                  onOpen={function () { isActive ? onCard('analyst') : onSwitchProject(p.id); }}
-                  onArchive={isActive ? null : function (e) { e.stopPropagation(); onArchiveProject(p.id); }}
-                  onDelete={null}
-                  isEditing={editingId === p.id}
-                  onStartEdit={function () { setEditingId(p.id); }}
-                  onCancelEdit={function () { setEditingId(null); }}
-                  onRename={function (newName) { setEditingId(null); onRenameProject(p.id, newName); }} />
-              );
-            })}
-          </div>
-          {archivedProjects.length > 0 && (
-            <div style={{ marginTop: '8px' }}>
-              <button onClick={function () { setShowArchived(!showArchived); }} style={{
-                fontSize: '11px', color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
-              }}>{showArchived ? 'Hide' : 'Show'} {archivedProjects.length} archived</button>
-              {showArchived && (
-                <div style={{ border: '1px solid var(--border)', borderRadius: '12px', marginTop: '8px', maxHeight: '200px', overflowY: 'auto' }}>
-                  {archivedProjects.map(function (p) {
+// --- HOW IT WORKS ---
+function HowItWorks() {
+  var paths = [
+    { icon: 'ti-search', color: '#2563eb', bg: 'rgba(37,99,235,0.12)', title: 'Buy or Invest', steps: [
+      { n: '1', t: 'Tell us your goals', d: 'Complete a short qualification. Share your budget, sector preference and deal structure.' },
+      { n: '2', t: 'Get your Acquisition Brief', d: 'Our AI builds a personalised buyer or investor profile, matched against verified listings.' },
+      { n: '3', t: 'Browse matched listings', d: 'See businesses that match your brief. Express interest and we facilitate the introduction.' },
+      { n: '4', t: 'Close the deal', d: 'Due diligence, term sheet and deal structuring, supported by our advisory team.' },
+    ] },
+    { icon: 'ti-building-store', color: '#16a34a', bg: 'rgba(22,163,74,0.12)', title: 'Sell or Raise Capital', steps: [
+      { n: '1', t: 'AI builds your financial model', d: 'A guided interview derives your P&L from actual operations - units, prices, costs.' },
+      { n: '2', t: 'Get your valuation report', d: 'DCF computed with Damodaran India data. Professional report in minutes, not weeks.' },
+      { n: '3', t: 'List with credibility', d: 'Your listing shows the valuation prominently. A verified badge builds buyer trust.' },
+      { n: '4', t: 'Receive qualified introductions', d: 'Only buyers who match your profile are introduced - no tyre-kickers.' },
+    ] },
+    { icon: 'ti-chart-bar', color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', title: 'Get a Valuation', steps: [
+      { n: '1', t: 'Choose your path', d: 'An AI interview for business owners, or direct manual entry for CAs with existing financials.' },
+      { n: '2', t: 'Model built automatically', d: 'Revenue, costs, working capital and depreciation - computed and checked for consistency.' },
+      { n: '3', t: 'Download your report', d: 'A professional DCF report with sensitivity analysis, plus an Excel model with live formulas.' },
+      { n: '4', t: 'Use for any purpose', d: 'Business sale, fundraising, FEMA, angel tax, ESOP, bank loan or shareholder disputes.' },
+    ] },
+  ];
+  return (
+    <section id="how-it-works" style={{ padding: '52px 24px', background: 'var(--surface-1)' }}>
+      <div style={{ maxWidth: '1180px', margin: '0 auto' }}>
+        <div style={{ textAlign: 'center', marginBottom: '36px' }}>
+          <p style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-accent)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 8px' }}>How it works</p>
+          <h2 style={{ fontSize: '24px', fontWeight: '600', margin: '0 0 8px', color: 'var(--text-primary)' }}>Three ways to use BuzinessDeals</h2>
+          <p style={{ fontSize: '14px', color: 'var(--text-muted)', margin: 0 }}>Whether you want to buy, sell, invest or get a valuation - we have a guided path for you</p>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
+          {paths.map(function (path) {
+            return (
+              <div key={path.title} style={{ background: 'var(--surface-2)', borderRadius: '14px', border: '1px solid var(--border)', padding: '22px', boxShadow: 'var(--shadow-sm)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '18px' }}>
+                  <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: path.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <i className={'ti ' + path.icon} aria-hidden="true" style={{ fontSize: '18px', color: path.color }} />
+                  </div>
+                  <h3 style={{ fontSize: '15px', fontWeight: '600', margin: 0, color: 'var(--text-primary)' }}>{path.title}</h3>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '13px' }}>
+                  {path.steps.map(function (step) {
                     return (
-                      <BusinessRow key={p.id} p={p} isActive={false} hasDraft={false} activePct={0} switchingProject={switchingProject}
-                        onOpen={function () { onUnarchiveProject(p.id); }}
-                        onArchive={null}
-                        onDelete={function (e) { e.stopPropagation(); onDeleteProject(p.id, p.name); }}
-                        isEditing={editingId === p.id}
-                        onStartEdit={function () { setEditingId(p.id); }}
-                        onCancelEdit={function () { setEditingId(null); }}
-                        onRename={function (newName) { setEditingId(null); onRenameProject(p.id, newName); }} />
+                      <div key={step.n} style={{ display: 'flex', gap: '11px', alignItems: 'flex-start' }}>
+                        <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: path.bg, color: path.color, fontSize: '10px', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '1px' }}>{step.n}</div>
+                        <div>
+                          <p style={{ fontSize: '13px', fontWeight: '500', margin: '0 0 2px', color: 'var(--text-primary)' }}>{step.t}</p>
+                          <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0, lineHeight: '1.5' }}>{step.d}</p>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            );
+          })}
         </div>
-      )}
-    </div>
-  );
-}
-
-function ComingNextPanel({ title, note }) {
-  return (
-    <div style={{ padding: '32px', maxWidth: '520px', margin: '80px auto 0', textAlign: 'center' }}>
-      <div style={{
-        width: '48px', height: '48px', borderRadius: '12px', background: 'var(--bg-accent)', margin: '0 auto 16px',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <i className="ti ti-tool" aria-hidden="true" style={{ fontSize: '22px', color: 'var(--text-accent)' }} />
       </div>
-      <h2 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 6px' }}>{title}</h2>
-      <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0, lineHeight: '1.6' }}>{note}</p>
-    </div>
+    </section>
   );
 }
 
-function RightPanel({ convPhase, user, sessionId, projectId, sellerForm, selEngId, convExtraction, convModel, brief, report, onReportGenerated, onCard, cardLoading, onHomeFromValuation, onProceedToValuation, onBrowseMatched, onAskAiAboutListing, onSellerFormChange, projectsList, onSwitchProject, onNewProject, onArchiveProject, onUnarchiveProject, onRenameProject, onDeleteProject, autoEditProjectId, onAutoEditConsumed, switchingProject, forceBusinessPanel }) {
+// --- FOR INVESTORS ---
+function ForInvestors(props) {
+  var checklist = [
+    'Minority and majority stake opportunities',
+    'Pre-vetted by our CA advisory team',
+    'Valuation report available before introduction',
+    'Sector and geography filters match your mandate',
+    'Structured introduction - no direct cold contact',
+  ];
+  var stats = [
+    { label: 'Verified listings', val: 'CA sign-off' },
+    { label: 'Deal structures', val: 'Full, majority, minority' },
+    { label: 'Matching', val: 'By budget & sector' },
+    { label: 'Introduction', val: 'Within 24-48 hrs' },
+  ];
   return (
-    <div style={{ width: '65%', flex: 1, height: '100%', overflowY: 'auto', background: 'var(--surface-0)' }}>
-      {convPhase === 'discovery' && <HomeScreen onCard={onCard} loadingKey={cardLoading} report={report} convExtraction={convExtraction} convModel={convModel} projectId={projectId} projectsList={projectsList} onSwitchProject={onSwitchProject} onNewProject={onNewProject} onArchiveProject={onArchiveProject} onUnarchiveProject={onUnarchiveProject} onRenameProject={onRenameProject} onDeleteProject={onDeleteProject} autoEditProjectId={autoEditProjectId} onAutoEditConsumed={onAutoEditConsumed} switchingProject={switchingProject} forceBusinessPanel={forceBusinessPanel} />}
+    <section id="for-investors" style={{ background: '#0f172a', padding: '56px 24px' }}>
+      <div style={{ maxWidth: '1180px', margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '40px', alignItems: 'center' }}>
+        <div>
+          <p style={{ fontSize: '12px', fontWeight: '600', color: '#93c5fd', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 10px' }}>For investors</p>
+          <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', margin: '0 0 14px', lineHeight: '1.3' }}>Deploy capital in verified Indian businesses</h2>
+          <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.65)', margin: '0 0 22px', lineHeight: '1.7' }}>
+            Every opportunity comes with a professional DCF valuation, an operational financial model, and a qualified introduction. No cold outreach, no unverified claims.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '11px', marginBottom: '24px' }}>
+            {checklist.map(function (item) {
+              return (
+                <div key={item} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                  <i className="ti ti-circle-check" aria-hidden="true" style={{ fontSize: '15px', color: '#86efac', flexShrink: 0, marginTop: '1px' }} />
+                  <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.85)' }}>{item}</span>
+                </div>
+              );
+            })}
+          </div>
+          <button onClick={props.onShowSignup} style={{ padding: '11px 26px', borderRadius: '8px', fontSize: '13px', fontWeight: '500', cursor: 'pointer', background: '#2563eb', color: '#fff', border: 'none' }}>Register as an investor →</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+          {stats.map(function (s) {
+            return (
+              <div key={s.label} style={{ padding: '18px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px' }}>
+                <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', margin: '0 0 4px' }}>{s.label}</p>
+                <p style={{ fontSize: '14px', fontWeight: '500', color: '#fff', margin: 0 }}>{s.val}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
 
-      {convPhase === 'valuation' && (
-        <ValuationPlatform
-          user={user}
-          engagementId={selEngId}
-          projectId={projectId}
-          initialForm={sellerForm}
-          onHome={onHomeFromValuation}
-          onFormChange={onSellerFormChange}
-          // Only shown when this project has a completed AI Financial Model
-          // to go back to - a direct/blank valuation (no convModel) has
-          // nowhere to "go back" to, so Home is the only exit in that case.
-          // Reuses the plain onCard('analyst') phase flip (no re-fetch, no
-          // reset of convModel/convExtraction), so the model already on
-          // screen just reappears exactly as it was left.
-          onBackToModel={convModel ? function () { onCard('analyst'); } : null}
-        />
-      )}
+// --- TOOLS ---
+function Tools(props) {
+  var items = [
+    { icon: 'ti-message-chatbot', color: '#2563eb', bg: 'rgba(37,99,235,0.12)', title: 'AI Financial Model', desc: 'A guided AI interview builds your complete P&L from actual operations. No spreadsheets - revenue derived from units × price, costs built line by line.', badge: 'From Rs. 1,500', badgeColor: '#16a34a', badgeBg: '#dcfce7', cta: 'Start interview', comingSoon: false },
+    { icon: 'ti-chart-bar', color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', title: 'Business Valuation', desc: 'DCF valuation with Damodaran India data, WACC computation and multi-method comparison. Professional report and an Excel model with live formulas.', badge: 'From Rs. 3,500', badgeColor: '#7c3aed', badgeBg: '#ede9fe', cta: 'Get a valuation', comingSoon: false },
+    { icon: 'ti-file-certificate', color: '#92400e', bg: 'rgba(146,64,14,0.12)', title: 'Term Sheet Generator', desc: 'AI-assisted term sheets for acquisitions and investments. Select deal terms, ask the AI advisor questions, get a professionally structured draft.', badge: 'Coming soon', badgeColor: '#92400e', badgeBg: '#fef3c7', cta: 'Join waitlist', comingSoon: true },
+  ];
+  return (
+    <section id="professional-tools" style={{ padding: '52px 24px' }}>
+      <div style={{ maxWidth: '1180px', margin: '0 auto' }}>
+        <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+          <p style={{ fontSize: '12px', fontWeight: '600', color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 8px' }}>Professional tools</p>
+          <h2 style={{ fontSize: '24px', fontWeight: '600', margin: '0 0 8px', color: 'var(--text-primary)' }}>AI-powered financial tools for businesses and CAs</h2>
+          <p style={{ fontSize: '14px', color: 'var(--text-muted)', margin: 0 }}>Use independently, or as part of your buy / sell journey</p>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+          {items.map(function (tool) {
+            return (
+              <div key={tool.title} style={{ background: 'var(--surface-2)', borderRadius: '14px', border: '1px solid var(--border)', padding: '24px', opacity: tool.comingSoon ? 0.85 : 1 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
+                  <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: tool.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <i className={'ti ' + tool.icon} aria-hidden="true" style={{ fontSize: '20px', color: tool.color }} />
+                  </div>
+                  <span style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '20px', background: tool.badgeBg, color: tool.badgeColor, fontWeight: '600' }}>{tool.badge}</span>
+                </div>
+                <h3 style={{ fontSize: '16px', fontWeight: '600', margin: '0 0 8px', color: 'var(--text-primary)' }}>{tool.title}</h3>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '0 0 18px', lineHeight: '1.6' }}>{tool.desc}</p>
+                <button onClick={function () { if (!tool.comingSoon) { props.onShowSignup(); } else { alert('This tool is coming soon. We will notify you when it launches.'); } }} style={{
+                  padding: '9px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
+                  background: tool.comingSoon ? 'var(--surface-1)' : tool.color, color: tool.comingSoon ? 'var(--text-muted)' : '#fff',
+                  border: tool.comingSoon ? '1px solid var(--border)' : 'none',
+                }}>{tool.cta}{!tool.comingSoon ? ' →' : ''}</button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
 
-      {convPhase === 'analyst' && (
-        <FinancialModelPanel
-          extraction={convExtraction}
-          model={convModel}
-          onProceed={onProceedToValuation}
-          sessionId={sessionId}
-          userId={user ? user.id : null}
-          userEmail={user ? user.email : null}
-          projectId={projectId}
-          report={report}
-          onReportGenerated={onReportGenerated}
-        />
+// --- PRICING CARD ---
+function PricingCard(props) {
+  var p = props.plan;
+  return (
+    <div style={{
+      background: 'var(--surface-2)', border: p.is_popular ? '2px solid var(--text-accent)' : '1px solid var(--border)',
+      borderRadius: '14px', padding: '22px', position: 'relative', display: 'flex', flexDirection: 'column',
+    }}>
+      {p.is_popular && (
+        <span style={{ position: 'absolute', top: '-10px', left: '20px', background: 'var(--text-accent)', color: '#fff', fontSize: '10px', fontWeight: '600', padding: '3px 10px', borderRadius: '999px' }}>Most popular</span>
       )}
-
-      {convPhase === 'buyerQualification' && (
-        <AcquisitionBriefPanel extraction={convExtraction} brief={brief} onProceed={onBrowseMatched} />
+      {p.badge && !p.is_popular && (
+        <span style={{ position: 'absolute', top: '-10px', left: '20px', background: 'var(--bg-success)', color: 'var(--text-success)', fontSize: '10px', fontWeight: '600', padding: '3px 10px', borderRadius: '999px' }}>{p.badge}</span>
       )}
-
-      {convPhase === 'listings' && (
-        <BuyerListingsPanel user={user} brief={brief} extraction={convExtraction} onAskAi={onAskAiAboutListing} />
+      <h3 style={{ fontSize: '14px', fontWeight: '600', margin: '4px 0 2px', color: 'var(--text-primary)' }}>{p.name}</h3>
+      <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '0 0 14px' }}>{p.subtitle}</p>
+      {p.is_coming_soon ? (
+        <p style={{ fontSize: '22px', fontWeight: '700', margin: '0 0 4px', color: 'var(--text-primary)' }}>Coming soon</p>
+      ) : (
+        <p style={{ margin: '0 0 4px' }}>
+          <span style={{ fontSize: '24px', fontWeight: '700', color: 'var(--text-primary)' }}>Rs. {Number(p.current_price).toLocaleString('en-IN')}</span>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}> /{p.period}</span>
+        </p>
       )}
+      <div style={{ flex: 1, margin: '10px 0 16px' }}>
+        {(p.features || []).map(function (f, i) {
+          return (
+            <div key={i} style={{ display: 'flex', gap: '6px', alignItems: 'flex-start', marginBottom: '6px' }}>
+              <i className="ti ti-check" aria-hidden="true" style={{ fontSize: '13px', color: 'var(--text-success)', marginTop: '1px' }} />
+              <span style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>{f}</span>
+            </div>
+          );
+        })}
+      </div>
+      <button onClick={props.onSelect} disabled={p.is_coming_soon} style={{
+        width: '100%', padding: '10px', borderRadius: '8px', fontSize: '12px', fontWeight: '500',
+        cursor: p.is_coming_soon ? 'default' : 'pointer',
+        background: p.is_coming_soon ? 'var(--surface-1)' : p.is_popular ? '#2563eb' : 'transparent',
+        color: p.is_coming_soon ? 'var(--text-muted)' : p.is_popular ? '#fff' : 'var(--text-accent)',
+        border: p.is_popular || p.is_coming_soon ? 'none' : '1.5px solid var(--text-accent)',
+      }}>{p.is_coming_soon ? 'Coming soon' : (p.cta_text || 'Get started')}</button>
     </div>
   );
 }
 
-// convPhase/convExtraction/convModel/brief/sellerForm/selEngId used to live
-// only in React memory, with nothing to restore them from. ConversationEngine
-// already restores the raw chat TEXT from ai_conversations on remount, but
-// these structured fields (what drives the right panel) had no restore path
-// at all - so a Bolt preview reload from switching tabs/windows (or any full
-// remount) silently dropped back to convPhase='discovery' with an empty
-// panel, even though the chat log itself came back. localStorage, keyed by
-// sessionId, closes that gap for same-browser reloads without needing a
-// schema change; it does not follow the user cross-device the way the
-// Supabase-backed chat history does; that would take carrying this state
-// into ai_conversations too, and hasn't been asked for beyond fixing this.
-var PLATFORM_STATE_PREFIX = 'bd_platform_state_';
-
-function loadPlatformState(sessionId) {
-  if (!sessionId || typeof localStorage === 'undefined') return null;
-  try {
-    var raw = localStorage.getItem(PLATFORM_STATE_PREFIX + sessionId);
-    return raw ? JSON.parse(raw) : null;
-  } catch (e) {
-    return null;
-  }
+// --- FOOTER ---
+function Footer() {
+  return (
+    <footer style={{ background: '#1a2332', padding: '48px 24px 24px' }}>
+      <div style={{ maxWidth: '1180px', margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '32px', marginBottom: '28px' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+            <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ fontSize: '12px', fontWeight: '700', color: '#fff' }}>BD</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: '14px', fontWeight: '600', color: '#fff', lineHeight: '1.1' }}>BuzinessDeals</span>
+              <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', lineHeight: '1.1' }}>by Zenius Advisors</span>
+            </div>
+          </div>
+          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', margin: 0 }}>Hyderabad, Telangana</p>
+        </div>
+        <div>
+          <p style={{ fontSize: '12px', fontWeight: '600', color: 'rgba(255,255,255,0.8)', margin: '0 0 12px' }}>Company</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {['About Us', 'How It Works', 'Pricing', 'Privacy Policy', 'Terms of Use'].map(function (link) {
+              return <a key={link} href="#" style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', textDecoration: 'none' }}>{link}</a>;
+            })}
+          </div>
+        </div>
+        <div>
+          <p style={{ fontSize: '12px', fontWeight: '600', color: 'rgba(255,255,255,0.8)', margin: '0 0 12px' }}>Contact</p>
+          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', margin: '0 0 4px' }}>{PHONE}</p>
+          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', margin: 0 }}>
+            <a href={'mailto:' + EMAIL} style={{ color: 'rgba(255,255,255,0.5)', textDecoration: 'none' }}>{EMAIL}</a>
+          </p>
+        </div>
+      </div>
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '16px', textAlign: 'center' }}>
+        <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', margin: 0 }}>© 2026 BuzinessDeals. All rights reserved. Operated by Zenius Advisors.</p>
+      </div>
+    </footer>
+  );
 }
 
-function savePlatformState(sessionId, state) {
-  if (!sessionId || typeof localStorage === 'undefined') return;
-  try {
-    localStorage.setItem(PLATFORM_STATE_PREFIX + sessionId, JSON.stringify(state));
-  } catch (e) {
-    // best-effort only - storage full/blocked should never break the app
-  }
-}
+export default function LandingPage({ sessionId }) {
+  var messagesSt = useState([]), messages = messagesSt[0], setMessages = messagesSt[1];
+  var inputSt = useState(''), input = inputSt[0], setInput = inputSt[1];
+  var loadingSt = useState(false), loading = loadingSt[0], setLoading = loadingSt[1];
+  var exchangeSt = useState(0), exchangeCount = exchangeSt[0], setExchangeCount = exchangeSt[1];
+  var lastActionSt = useState(null), lastAction = lastActionSt[0], setLastAction = lastActionSt[1];
+  var authModalSt = useState(null), authModal = authModalSt[0], setAuthModal = authModalSt[1];
 
-// Deep, non-destructive merge used only when loading a project's saved
-// state (see the useEffect below) - a value present in `next` only ever
-// overwrites `prior` when it's actually non-empty, checked all the way
-// down, not just at the top level. Mirrors the same principle as
-// ai-search-v2's mergeExtraction (never let an emptier turn silently erase
-// real data from an earlier one) but goes one level deeper - a shallow
-// merge would still let a later row's sparsely-filled businessProfile
-// object (e.g. only businessType known) wholesale-overwrite an earlier
-// row's fully-filled one, which is exactly the "lost data" bug this fixes.
-function isEmptyMergeValue(v) {
-  if (v == null || v === '') return true;
-  if (Array.isArray(v)) return v.length === 0;
-  if (typeof v === 'object') return Object.keys(v).length === 0;
-  return false;
-}
-function deepMergeExtraction(prior, next) {
-  if (isEmptyMergeValue(next)) return prior;
-  if (isEmptyMergeValue(prior)) return next;
-  if (Array.isArray(next) || Array.isArray(prior)) {
-    // No stable identity across two sessions' segment/lineItem arrays to
-    // merge element-by-element - the fuller array is the safer bet.
-    return (Array.isArray(next) ? next.length : 0) >= (Array.isArray(prior) ? prior.length : 0) ? next : prior;
-  }
-  if (typeof next === 'object' && typeof prior === 'object') {
-    var merged = Object.assign({}, prior);
-    Object.keys(next).forEach(function (key) {
-      merged[key] = deepMergeExtraction(prior[key], next[key]);
-    });
-    return merged;
-  }
-  return next;
-}
+  var listingsSt = useState(SAMPLE_LISTINGS), listings = listingsSt[0], setListings = listingsSt[1];
+  var pricingSt = useState(FALLBACK_PRICING), pricing = pricingSt[0], setPricing = pricingSt[1];
 
-function clearPlatformState(sessionId) {
-  if (!sessionId || typeof localStorage === 'undefined') return;
-  try {
-    localStorage.removeItem(PLATFORM_STATE_PREFIX + sessionId);
-  } catch (e) {
-    // no-op
-  }
-}
+  // Pathway 1 (direct discovery): selecting a category subdues the chat and
+  // filters the grid. Clicking an individual card opens a detail view that
+  // subdues the chat further and can hand context back into it.
+  var categorySt = useState(null), activeCategory = categorySt[0], setActiveCategory = categorySt[1];
+  var exploringSt = useState(null), exploring = exploringSt[0], setExploring = exploringSt[1];
 
-export default function Platform({ user, sessionId, onSignOut }) {
-  var currentOwnerId = user && user.id ? user.id : null;
-  var rawPersisted = loadPlatformState(sessionId);
-  // Cross-account data leak fix (see chat, 5 Sept 2026): App.jsx's sessionId
-  // is generated once per BROWSER and never regenerated, but this state is
-  // keyed only by sessionId - so on a shared browser, a second account
-  // logging in used to seed its very first render straight from whatever
-  // the FIRST account's Platform last saved here: their AI Financial Model,
-  // their in-progress valuation form, all of it. Only ever trust a saved
-  // blob when it was saved by nobody yet (ownerId null - the legitimate
-  // anonymous-chat-then-sign-up handoff App.jsx's SIGNED_IN transfer exists
-  // for) or by THIS SAME authenticated user. A different real account's
-  // leftover state is discarded outright, same as if nothing had ever been
-  // saved - the [user && user.id] effect below then repopulates everything
-  // correctly, server-side, scoped to whoever is actually logged in.
-  var persisted = (rawPersisted && (rawPersisted.ownerId == null || rawPersisted.ownerId === currentOwnerId)) ? rawPersisted : {};
-  var convPhaseSt = useState(persisted.convPhase || 'discovery'), convPhase = convPhaseSt[0], setConvPhase = convPhaseSt[1];
-  var convExtractionSt = useState(persisted.convExtraction || {}), convExtraction = convExtractionSt[0], setConvExtraction = convExtractionSt[1];
-  var convModelSt = useState(persisted.convModel || null), convModel = convModelSt[0], setConvModel = convModelSt[1];
-  var briefSt = useState(persisted.brief || null), brief = briefSt[0], setBrief = briefSt[1];
-  var sellerFormSt = useState(persisted.sellerForm || null), sellerForm = sellerFormSt[0], setSellerForm = sellerFormSt[1];
-  var selEngIdSt = useState(persisted.selEngId || null), selEngId = selEngIdSt[0], setSelEngId = selEngIdSt[1];
-  // Admin Portal is a full-screen overlay, deliberately NOT a convPhase value
-  // - convPhase also drives ConversationEngine's AI persona routing (Router/
-  // discovery, Financial Analyst/analyst, etc.), which has never been taught
-  // an "admin" phase. A separate boolean keeps this screen fully isolated
-  // from that state machine, same pattern as showDirectListing below.
-  //
-  // Defaults to true for admin accounts - an admin logging in has no reason
-  // to land on the seller/buyer discovery Home screen first. Computed
-  // inline here (rather than reusing the `isAdmin` var declared further
-  // below) purely because this runs earlier in the component and a fresh
-  // useState initializer only ever reads its argument once, on mount - not
-  // a hook-ordering concern, just avoids restructuring unrelated code.
-  // "Back to platform" (inside AdminPortal) still reaches the normal Home
-  // screen at any time, e.g. for testing the seller/buyer flows from this
-  // same admin login - it only clears this flag, nothing more.
-  var showAdminPortalSt = useState(!!(user && user.email && ADMIN_EMAILS.indexOf(user.email.toLowerCase()) !== -1)),
-    showAdminPortal = showAdminPortalSt[0], setShowAdminPortal = showAdminPortalSt[1];
-  // The generated AI Financial Model Report (see generate-financial-report
-  // edge function) - persisted the same way as sellerForm/convModel so it
-  // survives a remount instead of forcing regeneration (a real API call,
-  // not free) every time the user tabs away and back.
-  var reportSt = useState(persisted.report || null), report = reportSt[0], setReport = reportSt[1];
-  // Account-anchored persistence (see supabase/migrations/add_projects.sql
-  // and link_conversation_state.sql). Before this, convExtraction/convModel/
-  // brief/report only ever lived in this browser's localStorage, keyed by
-  // an anonymous per-browser sessionId with no link back to the account -
-  // "log out, log back in (or a different browser/device), report is gone"
-  // even though it was sitting untouched in financial_model_reports the
-  // whole time, because nothing ever queried it back by user_id. For a
-  // logged-in user, projectId becomes the real source of truth: fetched (or
-  // created) once below, then used to pull the latest saved extraction/
-  // model/brief/report from Supabase, which overwrites whatever the
-  // synchronous localStorage seed above painted first. localStorage is kept
-  // as-is purely for instant paint on remount and for the anonymous
-  // (logged-out) flow, which is unaffected by any of this.
-  var projectIdSt = useState(null), projectId = projectIdSt[0], setProjectId = projectIdSt[1];
-  // Phase 2: the account's full project list (id/name/status/updated_at
-  // only - deliberately lightweight, not each project's full extraction,
-  // so the switcher doesn't fire an N-query fan-out just to render a list).
-  // Empty for an anonymous user, same as projectId.
-  var projectsListSt = useState([]), projectsList = projectsListSt[0], setProjectsList = projectsListSt[1];
-  var switchingProjectSt = useState(false), switchingProject = switchingProjectSt[0], setSwitchingProject = switchingProjectSt[1];
-  // One-shot signal: set right after createNewProject succeeds, consumed by
-  // HomeScreen to auto-open that project's rename field, then cleared back
-  // to null via onAutoEditConsumed - see HomeScreen's effect.
-  var autoEditProjectIdSt = useState(null), autoEditProjectId = autoEditProjectIdSt[0], setAutoEditProjectId = autoEditProjectIdSt[1];
-  // "My Businesses" nav entry - HomeScreen's businesses panel already has
-  // real data and a real UI (list, rename, archive, switch), it just stays
-  // collapsed to a single quiet row for the common one-project/no-draft
-  // case (see HomeScreen's showBusinessPanel comment). This flag forces it
-  // open once the user has explicitly asked to see it via the nav menu,
-  // instead of that menu item silently doing nothing distinguishable from
-  // plain Home for that common case.
-  var forceBusinessPanelSt = useState(false), forceBusinessPanel = forceBusinessPanelSt[0], setForceBusinessPanel = forceBusinessPanelSt[1];
+  var leadFormSt = useState({ company_name: '', contact_name: '', mobile: '', email: '', requirement: '' });
+  var leadForm = leadFormSt[0], setLeadForm = leadFormSt[1];
+  var leadSubmittingSt = useState(false), leadSubmitting = leadSubmittingSt[0], setLeadSubmitting = leadSubmittingSt[1];
+  var leadSubmittedSt = useState(false), leadSubmitted = leadSubmittedSt[0], setLeadSubmitted = leadSubmittedSt[1];
 
-  function refreshProjectsList() {
-    if (!user || !user.id) return Promise.resolve([]);
-    return supabase.from('projects').select('id, name, status, updated_at').eq('user_id', user.id).order('updated_at', { ascending: false })
-      .then(function (res) {
-        var list = res.data || [];
-        setProjectsList(list);
-        return list;
-      })
-      .catch(function () { return []; });
+  var scrollRef = useRef(null);
+  var heroInputRef = useRef(null);
+  var atLimit = exchangeCount >= MAX_ANON_EXCHANGES;
+  // Visual priority leans toward whichever the user touched most recently,
+  // but it is never a LOCK - the chat's own input stays clickable/typeable
+  // at all times, no matter what else is dimmed.
+  var isChatting = messages.length > 0;
+  var isBrowsing = !!activeCategory || !!exploring;
+  var chatHasFocus = isChatting && !isBrowsing;
+  var discoveryHasFocus = isBrowsing;
+
+  function reclaimChatFocus() {
+    if (isBrowsing) { setActiveCategory(null); setExploring(null); }
   }
 
-  // Loads one project's saved state into the right panel and applies
-  // whatever is found - does NOT clear first. On first mount that's
-  // correct as-is (nothing to clear yet beyond the synchronous localStorage
-  // seed, which should only ever be overwritten by a real result, never
-  // blanked out from under it while the fetch is still in flight - blanking
-  // eagerly would flash seed-data -> blank -> real-data on every load, and
-  // would wipe a good seed if the fetch happened to fail). Callers that
-  // switch AWAY from an already-loaded project (switchProject) are
-  // responsible for clearing state themselves first - see there.
-  function loadProjectData(pid) {
-    if (!pid) return Promise.resolve();
-    return Promise.all([
-      // Every conversation row this project has, not just the most
-      // recently touched one. backfill_projects.sql links ALL of an
-      // account's pre-existing session rows to a single project, and
-      // "most recently updated" is not the same as "most complete" - a
-      // later throwaway test session (near-empty extraction) can outrank
-      // the real finished interview purely on timestamp, which is exactly
-      // the "lost data" bug reported after the first backfill run. Fetch
-      // them all, oldest first, and deep-merge - see deepMergeExtraction
-      // above. Going forward (post-Phase-1) persistConversation always
-      // PATCHes the one project-linked row, so this multi-row case should
-      // only ever matter for legacy, pre-backfill history.
-      supabase.from('ai_conversations').select('extraction, model, brief').eq('project_id', pid).order('updated_at', { ascending: true }),
-      supabase.from('financial_model_reports').select('*').eq('project_id', pid).order('created_at', { ascending: false }).limit(1).maybeSingle(),
-    ]).then(function (results) {
-      var convRows = (results[0] && results[0].data) || [];
-      var reportRow = results[1] && results[1].data;
-      var mergedExtraction = convRows.reduce(function (acc, row) { return deepMergeExtraction(acc, row.extraction); }, null);
-      var mergedModel = convRows.reduce(function (acc, row) { return deepMergeExtraction(acc, row.model); }, null);
-      var mergedBrief = convRows.reduce(function (acc, row) { return deepMergeExtraction(acc, row.brief); }, null);
-      if (mergedExtraction) setConvExtraction(mergedExtraction);
-      if (mergedModel) setConvModel(mergedModel);
-      if (mergedBrief) setBrief(mergedBrief);
-      if (reportRow) setReport(reportRow);
-    }).catch(function () {
-      // Best-effort - worst case this project shows blank until the next
-      // successful load; never block the app on this.
-    });
-  }
-
-  // Switches the active project: points projectId/right-panel state at a
-  // different one of the account's projects. Always lands back on Home
-  // (rather than deep-linking into whatever phase the OTHER project last
-  // left off in) - predictable, and matches the resume-banner pattern
-  // already established for the single-project case.
-  function switchProject(pid) {
-    if (pid === projectId) return;
-    setSwitchingProject(true);
-    setProjectId(pid);
-    setSellerForm(null);
-    setSelEngId(null);
-    setConvPhase('discovery');
-    // Clear explicitly before fetching - unlike the initial-mount call to
-    // loadProjectData, this one really does need to blank the PREVIOUS
-    // project's data first, or it stays visible on screen until the new
-    // project's fetch resolves.
-    setConvExtraction({});
-    setConvModel(null);
-    setBrief(null);
-    setReport(null);
-    loadProjectData(pid).then(function () { setSwitchingProject(false); });
-  }
-
-  function createNewProject() {
-    if (!user || !user.id) return;
-    setSwitchingProject(true);
-    supabase.from('projects').insert({ user_id: user.id, name: 'Untitled Business' }).select().single()
-      .then(function (res) {
-        if (!res.data) { setSwitchingProject(false); return; }
-        setProjectId(res.data.id);
-        setSellerForm(null);
-        setSelEngId(null);
-        setConvExtraction({});
-        setConvModel(null);
-        setBrief(null);
-        setReport(null);
-        setConvPhase('discovery');
-        setSwitchingProject(false);
-        setAutoEditProjectId(res.data.id);
-        refreshProjectsList();
-      })
-      .catch(function () { setSwitchingProject(false); });
-  }
-
-  // Answers "how do I tell which is which" directly: available on every
-  // project at any time (not just at creation), so a bad or duplicate
-  // auto-derived name (e.g. two different businesses that both extracted
-  // to the same generic businessType) can always be fixed by hand.
-  function renameProject(pid, name) {
-    if (!pid || !name) return;
-    supabase.from('projects').update({ name: name }).eq('id', pid)
-      .then(function () { refreshProjectsList(); }).catch(function () {});
-  }
-
-  // Only reachable from the archived list (see HomeScreen) - deliberately
-  // not available on a live project, so a delete always passes through
-  // archive first. Permanent and irreversible: cascades to that project's
-  // ai_conversations/financial_model_reports rows via the FK in
-  // add_projects.sql. Confirmed explicitly before it fires.
-  function deleteProjectPermanently(pid, name) {
-    if (!pid) return;
-    var ok = typeof window !== 'undefined' && window.confirm(
-      'Permanently delete "' + (name || 'this business') + '"? This removes its entire interview history and any generated report. This cannot be undone.'
-    );
-    if (!ok) return;
-    supabase.from('projects').delete().eq('id', pid)
-      .then(function () { refreshProjectsList(); }).catch(function () {});
-  }
-
-  // Best-effort project.updated_at bump so "most recently touched" sorting
-  // (both the switcher list order and which project loads by default on
-  // next login) actually tracks activity, not just row creation time - see
-  // handleExtraction below. Never awaited, never blocks the UI.
-  function touchProjectActivity(pid) {
-    if (!pid) return;
-    supabase.from('projects').update({ updated_at: new Date().toISOString() }).eq('id', pid).then(function () {}).catch(function () {});
-  }
-
-  // Soft-delete only - archiving sets status and hides the project from the
-  // default switcher list, it never drops the row (or the conversation/
-  // report rows hanging off it via project_id). Reversible via
-  // unarchiveProject. A true permanent delete isn't offered here on
-  // purpose - this is exactly the kind of data an earlier round of this
-  // build already lost once by accident; nothing here should risk that
-  // again for a feature whose whole point is decluttering a list.
-  function archiveProject(pid) {
-    if (!pid || pid === projectId) return; // never archive the one currently open
-    supabase.from('projects').update({ status: 'archived' }).eq('id', pid)
-      .then(function () { refreshProjectsList(); }).catch(function () {});
-  }
-  function unarchiveProject(pid) {
-    if (!pid) return;
-    // Recompute rather than blindly resetting to 'draft' - the column has
-    // no "status before archiving" memory, so a project that was actually
-    // model_complete before being archived needs that re-derived from
-    // whether it still has a report/model, not just reset to draft.
-    Promise.all([
-      supabase.from('financial_model_reports').select('id').eq('project_id', pid).limit(1).maybeSingle(),
-      supabase.from('ai_conversations').select('model').eq('project_id', pid).not('model', 'is', null).limit(1).maybeSingle(),
-    ]).then(function (results) {
-      var hasReport = !!(results[0] && results[0].data);
-      var hasModel = !!(results[1] && results[1].data);
-      var status = hasReport || hasModel ? 'model_complete' : 'draft';
-      return supabase.from('projects').update({ status: status, updated_at: new Date().toISOString() }).eq('id', pid);
-    }).then(function () { refreshProjectsList(); }).catch(function () {});
-  }
+  var filteredListings = activeCategory
+    ? listings.filter(function (l) { return (l.sector || '').toLowerCase().indexOf(activeCategory.toLowerCase()) !== -1; })
+    : listings;
 
   useEffect(function () {
-    var cancelled = false;
-    if (!user || !user.id) return undefined; // anonymous - untouched, localStorage-only as before
-
-    refreshProjectsList()
-      .then(function (list) {
-        if (cancelled) return null;
-        // Never auto-select an archived project as the default active one,
-        // even if it happens to be the most recently updated row.
-        var live = list.filter(function (p) { return p.status !== 'archived'; });
-        if (live.length > 0) return live[0]; // already sorted by updated_at desc
-        // First time this account has ever reached the platform - give them
-        // a project to attach state to from the very first turn, rather
-        // than creating one lazily mid-interview and risking an early turn
-        // going unsaved.
-        return supabase.from('projects').insert({ user_id: user.id, name: 'Untitled Business' }).select().single()
-          .then(function (r) { return r.data; })
-          .then(function (project) { return refreshProjectsList().then(function () { return project; }); });
-      })
-      .then(function (project) {
-        if (cancelled || !project) return;
-        setProjectId(project.id);
-        // Bridge the "signed in mid-chat" gap (see chat, 5 Sept 2026):
-        // App.jsx's SIGNED_IN handler transfers user_id onto this browser's
-        // anonymous ai_conversations row (matched by session_id) the
-        // moment login completes, but it never touches project_id - and
-        // the project picked/created just above comes from the `projects`
-        // table, which that anonymous row was never linked to. Left alone
-        // the two never meet: the conversation the user was mid-interview
-        // on a second ago sits in a project_id-null row forever, invisible
-        // to loadProjectData's project_id-scoped query below, and their
-        // chat reopens as a blank greeting instead of continuing. Link it
-        // to this account's active project before loading - same "don't
-        // lose a real conversation to a filing gap" principle as
-        // backfill_projects.sql. No-op (0 rows) for a normal returning
-        // login with nothing anonymous left to claim.
-        return supabase.from('ai_conversations')
-          .update({ project_id: project.id })
-          .eq('session_id', sessionId)
-          .eq('user_id', user.id)
-          .is('project_id', null)
-          .then(function () { return project; })
-          .catch(function () { return project; });
-      })
-      .then(function (project) {
-        if (cancelled || !project) return;
-        return loadProjectData(project.id);
-      })
-      .catch(function () {
-        // Best-effort - if this fails (offline, RLS misconfigured, etc.)
-        // the user still has whatever localStorage seeded, same as before
-        // this change existed. Never block the app on this.
+    supabase.from('listings').select('*').eq('status', 'live').order('listed_at', { ascending: false }).limit(8)
+      .then(function (res) {
+        if (res.data && res.data.length > 0) setListings(res.data);
       });
+    supabase.from('pricing').select('*').order('sort_order', { ascending: true })
+      .then(function (res) {
+        if (res.data && res.data.length > 0) setPricing(res.data);
+      });
+  }, []);
 
-    return function () { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user && user.id]);
-
-  // Listing-click -> chat context handoff (bidirectional discovery link).
-  var injectSt = useState(null), injectMessage = injectSt[0], setInjectMessage = injectSt[1];
-  // Which HomeScreen card (if any) is mid-async-load (see handleCard's
-  // 'valuation' case) - lets HomeScreen show a brief loading state instead
-  // of appearing unresponsive while the profile-based form is fetched.
-  var cardLoadingSt = useState(null), cardLoading = cardLoadingSt[0], setCardLoading = cardLoadingSt[1];
-  // Direct "List Your Business" path - a modal overlay, not a convPhase, so
-  // it can open on top of whatever's currently showing (including Home)
-  // without disturbing the chat/right-panel state underneath it.
-  var showDirectListingSt = useState(false), showDirectListing = showDirectListingSt[0], setShowDirectListing = showDirectListingSt[1];
-  // Shown once, dismissibly, right after a self-reported listing is
-  // submitted - the AI Financial Model upsell ("upgrade to Verified").
-  var directListingUpsellSt = useState(false), directListingUpsell = directListingUpsellSt[0], setDirectListingUpsell = directListingUpsellSt[1];
-
-  // Persist on every change so a remount (tab switch/away-and-back, preview
-  // reload) restores the panel instead of resetting to Home.
   useEffect(function () {
-    // ownerId travels with the saved blob so the next load (this account,
-    // a different account, or back to anonymous) can tell whose data this
-    // actually is - see the read side in Platform's own top-of-function
-    // comment for why that check exists.
-    savePlatformState(sessionId, { ownerId: currentOwnerId, convPhase: convPhase, convExtraction: convExtraction, convModel: convModel, brief: brief, sellerForm: sellerForm, selEngId: selEngId, report: report });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, currentOwnerId, convPhase, convExtraction, convModel, brief, sellerForm, selEngId, report]);
+    if (isChatting && scrollRef.current) {
+      setTimeout(function () {
+        if (scrollRef.current) scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }, 50);
+    }
+  }, [messages, loading]);
 
-  var isAdmin = !!(user && user.email && ADMIN_EMAILS.indexOf(user.email.toLowerCase()) !== -1);
+  useEffect(function () {
+    var el = heroInputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    var next = Math.min(el.scrollHeight, 120);
+    el.style.height = next + 'px';
+  }, [input]);
 
+  function resetConversation() {
+    setMessages([]);
+    setExchangeCount(0);
+    setLastAction(null);
+    setInput('');
+  }
+
+  // Clicking the logo should behave like a "home" link: clear whatever
+  // in-progress state is showing (chat, category filter, listing detail,
+  // any open auth modal) and scroll back to the very top of the page.
   function goHome() {
-    setConvPhase('discovery');
+    resetConversation();
+    setActiveCategory(null);
+    setExploring(null);
+    setAuthModal(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function goBusinesses() {
-    setForceBusinessPanel(true);
-    setConvPhase('discovery');
+  function handleCategoryClick(cat) {
+    setExploring(null);
+    setActiveCategory(activeCategory === cat.key ? null : cat.key);
   }
 
-  // Shared by handleModelComplete (after the AI interview finishes) and
-  // handleCard's direct "Valuation Report" entry (no interview at all) - both
-  // need the same profile lookup so ValuationPlatform gets a non-null
-  // initialForm with engagementType already set, instead of falling back to
-  // the legacy "who is performing this valuation" landing screen.
-  function loadSellerFormForProfile(model, computed, cb) {
-    var applyForm = function (profile) {
-      cb(buildV3FormFromModel(model, computed, profile));
-    };
-    if (user && user.id) {
-      var settled = false;
-      var timeoutId = setTimeout(function () {
-        if (settled) return;
-        settled = true;
-        applyForm(null);
-      }, 3000);
-      supabase.from('profiles').select('*').eq('id', user.id).maybeSingle().then(function (res) {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeoutId);
-        var p = res.data;
-        applyForm(p ? {
-          fullName: p.full_name,
-          isProfessional: p.is_professional,
-          designation: p.designation,
-          membershipNumber: p.membership_number,
-          firmName: p.firm_name,
-          firmAddress: p.firm_address,
-        } : null);
-      }).catch(function () {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeoutId);
-        applyForm(null);
-      });
-    } else {
-      applyForm(null);
-    }
-  }
-
-  function handleCard(cardKey) {
-    if (cardKey === 'directListing') {
-      setShowDirectListing(true);
-      return;
-    }
-    if (cardKey === 'valuation') {
-      // Reuse this project's completed AI Financial Model if one exists -
-      // exactly what handleProceedFromModel does for the "Use this model
-      // for valuation ->" button. This card used to ALWAYS seed a blank
-      // valuation (model=null), regardless of whether a completed,
-      // confirmed model already existed for the active project - which is
-      // how real numbers, built moments earlier, could look like they
-      // "vanished" the instant the user went Home and reopened valuation
-      // from this card instead of that button. There's no reason those two
-      // paths should behave differently when they land on the same
-      // project: if a model exists, use it; only fall back to a blank form
-      // (model=null) when there genuinely isn't one yet, so
-      // ValuationPlatform still never mounts with a null initialForm (which
-      // would show the legacy engagementType picker screen).
-      setSelEngId(null);
-      setCardLoading('valuation');
-      loadSellerFormForProfile(convModel, convModel ? computeModel(convModel) : null, function (form) {
-        setSellerForm(form);
-        setConvPhase('valuation');
-        setCardLoading(null);
-      });
-      return;
-    }
-    setConvPhase(cardKey);
-  }
-
-  // --- ConversationEngine callbacks ----------------------------------------
-
-  function handleExtraction(data) {
-    setConvExtraction(data);
-    touchProjectActivity(projectId);
-    // Opportunistic rename off the AI's own extraction, once it knows one -
-    // without this every project in the switcher would read "Untitled
-    // Business" forever, which defeats the point of a list. Only fires
-    // while the project is still on the default name, so it never
-    // clobbers something the account holder set deliberately (renaming is
-    // a later, explicit-UI concern, not built here).
-    var bp = data && data.businessProfile;
-    var derivedName = bp && (bp.name || bp.businessType);
-    if (derivedName && projectId) {
-      var current = projectsList.filter(function (p) { return p.id === projectId; })[0];
-      if (!current || current.name === 'Untitled Business') {
-        supabase.from('projects').update({ name: derivedName }).eq('id', projectId)
-          .then(function () { refreshProjectsList(); }).catch(function () {});
-      }
-    }
-  }
-
-  function handleModelComplete(model) {
-    setConvModel(model);
-    var computed = computeModel(model);
-    // Professional credentials (CA name, membership number, firm) shape the
-    // report per spec section 10 - best-effort fetch, falls back to the
-    // platform-indicative defaults baked into buildV3FormFromModel if this
-    // fails or the user has no profile row yet.
-    loadSellerFormForProfile(model, computed, setSellerForm);
-    // Surfaces in the project switcher (see HomeScreen) without it having
-    // to fetch every project's full extraction just to show a status badge.
-    if (projectId) {
-      supabase.from('projects').update({ status: 'model_complete', updated_at: new Date().toISOString() }).eq('id', projectId)
-        .then(function () {}).catch(function () {});
-    }
-  }
-
-  function handleBriefComplete(briefData) {
-    setBrief(briefData);
-  }
-
-  // Any set_next_phase-driven transition into 'valuation' - clicking a chat
-  // action button mid-conversation, from ANY persona (discovery, analyst,
-  // wherever) - used to just flip convPhase directly via setConvPhase, same
-  // as every other phase change. That's fine for every destination except
-  // valuation: ValuationPlatform needs a profile-based initialForm or it
-  // falls back to the legacy "who is performing this valuation" engagement-
-  // type picker (see loadSellerFormForProfile's comment above). Only
-  // handleCard('valuation') and handleModelComplete were ever taught to do
-  // that pre-fetch - a mid-chat button into valuation skipped it entirely,
-  // landing on the discarded picker screen even after a full conversation
-  // of gathered numbers. Route every transition into 'valuation' through
-  // the same pre-fetch, using whatever model this session already has (a
-  // completed analyst model if one exists, else null - buildV3FormFromModel
-  // handles either) so this can't regress again via a fourth entry point.
-  function handlePhaseChange(nextPhase) {
-    // Checking sellerForm.engagementType, not just sellerForm's truthiness,
-    // is deliberate: a sellerForm object can be truthy but still lack
-    // engagementType (see the comment on ValuationPlatform's onFormChange
-    // effect - that was, until just now, how a visit to the picker screen
-    // silently poisoned this exact state, permanently, even in localStorage).
-    // Treating that shape the same as "no sellerForm yet" makes this guard
-    // self-healing against any such object already sitting in memory or
-    // localStorage from before that source fix existed.
-    if (nextPhase === 'valuation' && !(sellerForm && sellerForm.engagementType)) {
-      setCardLoading('valuation');
-      // NOTE: this "only rebuild if sellerForm looks empty" guard is
-      // deliberately conservative here, for the ConversationEngine-driven
-      // caller (a mid-chat "set_next_phase" nudge shouldn't blow away a
-      // valuation the user is already mid-edit on). The "Use this model for
-      // valuation" button in FinancialModelPanel does NOT go through this
-      // function any more - see handleProceedFromModel below, which always
-      // rebuilds. Splitting these apart is what fixed a real bug: a
-      // sellerForm that already has engagementType set (so this guard would
-      // leave it alone) can still have been built from stale/empty data -
-      // e.g. handleCard('valuation')'s deliberate model=null seed, from an
-      // earlier direct "Valuation Report" click before this project's AI
-      // interview ever ran. Routing the button through this shared,
-      // cache-trusting guard is exactly how a confirmed, non-zero completed
-      // model (revenue.annualTotal for real, verified via the Financial
-      // Model screen) still produced an all-zero valuation form: the guard
-      // saw an already-"complete" stale sellerForm and never rebuilt it.
-      loadSellerFormForProfile(convModel, convModel ? computeModel(convModel) : null, function (form) {
-        setSellerForm(form);
-        setConvPhase(nextPhase);
-        setCardLoading(null);
-      });
-      return;
-    }
-    setConvPhase(nextPhase);
-  }
-
-  // The FinancialModelPanel "Use this model for valuation ->" button always
-  // means exactly what it says: build the valuation form from the model
-  // that's on screen right now. Unlike handlePhaseChange's other caller (a
-  // mid-chat nudge, where reusing an in-progress sellerForm is the safer
-  // default), there's no ambiguity to preserve here - so this never trusts
-  // whatever sellerForm already happens to be in state, it always rebuilds
-  // fresh from the current convModel.
-  function handleProceedFromModel() {
-    setCardLoading('valuation');
-    loadSellerFormForProfile(convModel, convModel ? computeModel(convModel) : null, function (form) {
-      setSellerForm(form);
-      setConvPhase('valuation');
-      setCardLoading(null);
-    });
-  }
-
-  function handleAction(actionType) {
-    // Direct-navigation actions (distinct from convPhase, which is already
-    // driven by onPhaseChange) will route into SellerDashboard / specific
-    // engagements once those exist. For now this is a pass-through hook so
-    // ConversationEngine doesn't need to know Platform's future sub-routes.
-    console.log('ConversationEngine action:', actionType);
+  function handleListingClick(listing) {
+    setActiveCategory(null);
+    setExploring(listing);
   }
 
   function handleAskAiAboutListing(listing) {
-    var text = 'I want to know more about ' + listing.business_name + ' (' + listing.sector + ', ' + listing.city + '). Can you analyse this business against my requirements?';
-    setInjectMessage({ text: text, key: Date.now() + '_' + listing.id });
+    var prompt = 'I want to know more about ' + listing.business_name + ' (' + listing.sector + ', ' + listing.city + '). Can you analyse this business against my requirements?';
+    setActiveCategory(null);
+    setExploring(null);
+    sendMessage(prompt);
   }
 
-  function handleReset() {
-    setConvExtraction({});
-    setConvModel(null);
-    setBrief(null);
-    setSellerForm(null);
-    setSelEngId(null);
-    setReport(null);
-    clearPlatformState(sessionId);
-    // "Clear" is meant to let the user start completely from the beginning -
-    // that means back at Home, not sitting in an emptied-out version of
-    // whichever section they were already in.
-    setConvPhase('discovery');
-    // For a logged-in user, the old data isn't actually gone (it's the prior
-    // project, still safely in Supabase) - clearing the CURRENT project's
-    // data in place would destroy it. Instead, start a fresh project and
-    // switch to it, same distinction "New Business" will make explicit once
-    // there's a switcher UI (Phase 2) to move between them. Anonymous users
-    // have no project concept - unaffected, same as before.
-    if (user && user.id) {
-      supabase.from('projects').insert({ user_id: user.id, name: 'Untitled Business' }).select().single()
-        .then(function (res) { if (res.data) setProjectId(res.data.id); })
-        .catch(function () { /* best-effort - worst case this session keeps the old projectId */ });
-    }
+  function sendMessage(text) {
+    var val = (text != null ? text : input).trim();
+    if (!val || loading || atLimit) return;
+    setActiveCategory(null);
+    setExploring(null);
+    setInput('');
+    setLastAction(null);
+    var newMessages = messages.concat([{ role: 'user', text: val }]);
+    setMessages(newMessages);
+    setLoading(true);
+
+    var history = newMessages.map(function (m) { return { role: m.role, content: m.text }; });
+
+    callAiSearch({
+      message: val,
+      history: history,
+      userContext: '',
+      sessionId: sessionId,
+      userId: null,
+      conversationPhase: 'discovery',
+      exchangeCount: exchangeCount,
+    }).then(function (data) {
+      setLoading(false);
+      var reply = stripTags(data.reply || "Sorry, I didn't quite catch that - could you rephrase?");
+      setMessages(newMessages.concat([{ role: 'assistant', text: reply }]));
+      setExchangeCount(function (c) { return c + 1; });
+      if (data.action && data.action.type) setLastAction(data.action);
+    }).catch(function () {
+      setLoading(false);
+      setMessages(newMessages.concat([{ role: 'assistant', text: 'Something went wrong reaching the AI advisor. Please try again in a moment.' }]));
+    });
   }
+
+  function handleActionClick() {
+    setAuthModal('signup');
+  }
+
+  function handleLeadChange(field, value) {
+    setLeadForm(function (prev) { return Object.assign({}, prev, { [field]: value }); });
+  }
+
+  function handleLeadSubmit(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!leadForm.contact_name || !leadForm.mobile) return;
+    setLeadSubmitting(true);
+    supabase.from('leads').insert({
+      company_name: leadForm.company_name,
+      contact_name: leadForm.contact_name,
+      mobile: leadForm.mobile,
+      email: leadForm.email,
+      requirement: leadForm.requirement,
+    }).then(function (res) {
+      setLeadSubmitting(false);
+      if (!res.error) {
+        setLeadSubmitted(true);
+        sendNotification('new_lead', leadForm);
+      }
+    });
+  }
+
+  var professionalTools = pricing.filter(function (p) { return LISTING_PACKAGE_IDS.indexOf(p.id) === -1; });
+  var listingPackages = pricing.filter(function (p) { return LISTING_PACKAGE_IDS.indexOf(p.id) !== -1; });
+
+  var inp = {
+    width: '100%', padding: '9px 12px', borderRadius: '8px',
+    border: '1.5px solid var(--border)', background: 'var(--surface-1)', color: 'var(--text-primary)',
+    fontSize: '13px', fontFamily: 'var(--font-sans)', outline: 'none', boxSizing: 'border-box',
+  };
+  var lbl = { fontSize: '12px', fontWeight: '500', color: 'var(--text-secondary)', marginBottom: '4px', display: 'block' };
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {showAdminPortal && (
-        <AdminPortal user={user} onClose={function () { setShowAdminPortal(false); }} />
-      )}
-      <NavBar user={user} isAdmin={isAdmin} onHome={goHome} onGoBusinesses={goBusinesses} onGoListings={function () { setConvPhase('listings'); }} onGoAdmin={function () { setShowAdminPortal(true); }} onSignOut={onSignOut} />
-      {directListingUpsell && (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
-          padding: '10px 20px', background: '#ecfdf5', borderBottom: '1px solid #6ee7b7', flexShrink: 0,
+    <div style={{ minHeight: '100vh', background: 'var(--surface-0)' }}>
+      <style>{'html { scroll-behavior: smooth; }'}</style>
+      {authModal && <AuthModal mode={authModal} onClose={function () { setAuthModal(null); }} />}
+
+      {/* ===== 1. NAVIGATION ===== */}
+      <NavBar onLogoClick={goHome} onSignIn={function () { setAuthModal('signin'); }} onGetStarted={function () { setAuthModal('signup'); }} />
+
+      {/* ===== 2. AI CHAT HERO ===== */}
+      <section style={{
+        background: 'linear-gradient(180deg, #0f172a, #1e293b)', padding: '56px 20px 40px',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        filter: discoveryHasFocus ? 'blur(2px)' : 'none',
+        opacity: discoveryHasFocus ? 0.55 : 1,
+        transition: 'filter 0.3s, opacity 0.3s',
+      }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: '7px', fontSize: '12px', letterSpacing: '0.02em',
+          color: '#93c5fd', fontWeight: '600', margin: '0 0 16px', padding: '7px 18px', borderRadius: '999px',
+          background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.35)',
         }}>
-          <p style={{ fontSize: '12px', color: '#065f46', margin: 0, lineHeight: '1.5' }}>
-            <strong>Listing submitted for review</strong> — it's marked self-reported for now. Complete the AI Financial Model (Rs. 1,500) any time to run a real valuation and upgrade it to a Verified badge, which buyers trust more.
-          </p>
-          <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
-            <button onClick={function () { setDirectListingUpsell(false); handleCard('analyst'); }} style={{
-              fontSize: '12px', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer',
-              background: '#059669', color: '#fff', border: 'none', whiteSpace: 'nowrap',
-            }}>Start AI Financial Model →</button>
-            <button onClick={function () { setDirectListingUpsell(false); }} style={{
-              fontSize: '12px', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer',
-              background: 'transparent', color: '#065f46', border: '1px solid #6ee7b7',
-            }}>Dismiss</button>
+          <i className="ti ti-sparkles" aria-hidden="true" style={{ fontSize: '12px' }} /> India's first AI-powered business marketplace
+        </span>
+        <h1 style={{
+          fontSize: 'clamp(26px, 4vw, 40px)', fontWeight: '700', color: '#fff', textAlign: 'center',
+          margin: '0 0 12px', maxWidth: '1020px', lineHeight: '1.25',
+        }}>
+          Buy, Sell or Invest in{' '}
+          <span style={{
+            background: 'linear-gradient(90deg, #93c5fd, #c4b5fd)',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+          }}>Indian{' '}Businesses</span>
+        </h1>
+        <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.6)', textAlign: 'center', margin: '0 0 32px', maxWidth: '560px' }}>
+          Talk to our AI advisor — get guidance on buying, selling, investing or valuing a business.
+        </p>
+
+        <div style={{ width: '100%', maxWidth: '620px' }}>
+          {!isChatting && (
+            <>
+              <div style={{
+                background: 'rgba(255,255,255,0.07)', borderRadius: '999px', padding: '10px 10px 10px 20px',
+                display: 'flex', alignItems: 'flex-end', gap: '10px', boxShadow: '0 12px 32px rgba(0,0,0,0.3)',
+                border: '1px solid rgba(255,255,255,0.18)',
+              }}>
+                <i className="ti ti-sparkles" aria-hidden="true" style={{ fontSize: '15px', color: '#818cf8', marginBottom: '12px' }} />
+                <textarea
+                  className="bd-dark-input"
+                  ref={heroInputRef}
+                  rows={1}
+                  value={input}
+                  disabled={atLimit}
+                  onFocus={reclaimChatFocus}
+                  onChange={function (e) { setInput(e.target.value); }}
+                  onKeyDown={function (e) {
+                    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); sendMessage(); }
+                  }}
+                  placeholder={atLimit ? 'Create an account to continue...' : 'Ask me anything — sell my business, invest 2 crore, FEMA valuation...'}
+                  style={{
+                    flex: 1, border: 'none', outline: 'none', background: 'transparent', color: '#fff',
+                    fontSize: '14px', padding: '9px 0',
+                    resize: 'none', overflowY: 'auto', maxHeight: '120px', lineHeight: '1.5', fontFamily: 'inherit',
+                  }}
+                />
+                <button
+                  onClick={function () { sendMessage(); }}
+                  disabled={atLimit || loading || !input.trim()}
+                  style={{
+                    flexShrink: 0, border: 'none', borderRadius: '999px', padding: '11px 18px',
+                    background: atLimit || loading || !input.trim() ? 'rgba(255,255,255,0.12)' : '#2563eb',
+                    color: atLimit || loading || !input.trim() ? 'rgba(255,255,255,0.4)' : '#fff',
+                    cursor: atLimit || loading || !input.trim() ? 'default' : 'pointer',
+                    display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '600',
+                  }}
+                >Ask <span aria-hidden="true">→</span></button>
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', marginTop: '16px' }}>
+                {SUGGESTED_PROMPTS.map(function (p) {
+                  return (
+                    <button key={p} onClick={function () { sendMessage(p); }} style={{
+                      background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+                      color: 'rgba(255,255,255,0.85)', fontSize: '12px', padding: '8px 14px',
+                      borderRadius: '999px', cursor: 'pointer',
+                    }}>{p}</button>
+                  );
+                })}
+              </div>
+
+              <div style={{
+                display: 'flex', flexWrap: 'wrap', gap: '28px', justifyContent: 'center',
+                marginTop: '26px', paddingTop: '18px', borderTop: '1px solid rgba(255,255,255,0.08)',
+              }}>
+                {TRUST_BADGES.map(function (b) {
+                  return (
+                    <div key={b.title} style={{ textAlign: 'center' }}>
+                      <p style={{ fontSize: '12px', fontWeight: '600', color: 'rgba(255,255,255,0.85)', margin: '0 0 2px' }}>{b.title}</p>
+                      <p style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', margin: 0 }}>{b.sub}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {isChatting && (
+            <div onFocus={reclaimChatFocus} style={{ display: 'flex', flexDirection: 'column' }}>
+              {messages.map(function (m, i) {
+                var isUser = m.role === 'user';
+                if (isUser) {
+                  return (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '14px' }}>
+                      <div style={{
+                        maxWidth: '78%', padding: '10px 15px', borderRadius: '12px 12px 3px 12px',
+                        fontSize: '13px', lineHeight: '1.55', whiteSpace: 'pre-wrap',
+                        background: '#2563eb', color: '#fff', fontWeight: '500',
+                      }}>{m.text}</div>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '14px' }}>
+                    <span aria-hidden="true" style={{
+                      width: '28px', height: '28px', borderRadius: '9px', background: '#4f46e5', flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '2px',
+                    }}><i className="ti ti-sparkles" aria-hidden="true" style={{ fontSize: '13px', color: '#fff' }} /></span>
+                    <div style={{
+                      maxWidth: '78%', padding: '12px 16px', borderRadius: '4px 12px 12px 12px',
+                      fontSize: '13px', lineHeight: '1.6', whiteSpace: 'pre-wrap', color: 'rgba(255,255,255,0.92)',
+                      background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                    }}>{m.text}</div>
+                  </div>
+                );
+              })}
+
+              {loading && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+                  <span aria-hidden="true" style={{
+                    width: '28px', height: '28px', borderRadius: '9px', background: '#4f46e5', flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}><i className="ti ti-sparkles" aria-hidden="true" style={{ fontSize: '13px', color: '#fff' }} /></span>
+                  <div style={{ display: 'flex', gap: '4px', padding: '12px 16px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px 12px 12px 12px' }}>
+                    {[0, 1, 2].map(function (i) {
+                      return <span key={i} style={{
+                        width: '5px', height: '5px', borderRadius: '50%', background: 'rgba(255,255,255,0.6)',
+                        animation: 'pulse 1.2s infinite', animationDelay: (i * 0.2) + 's',
+                      }} />;
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {lastAction && !atLimit && (
+                <div style={{ marginLeft: '38px', marginBottom: '10px' }}>
+                  <button onClick={handleActionClick} style={{
+                    background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px',
+                    padding: '10px 16px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
+                  }}>{lastAction.label || 'Continue →'}</button>
+                </div>
+              )}
+
+              {atLimit && (
+                <div style={{
+                  marginLeft: '38px', marginBottom: '10px', padding: '16px', background: 'rgba(37,99,235,0.15)',
+                  border: '1px solid rgba(96,165,250,0.4)', borderRadius: '12px',
+                }}>
+                  <p style={{ fontSize: '13px', color: '#fff', lineHeight: '1.6', margin: '0 0 12px' }}>
+                    I have a good picture of your situation. To continue and get specific recommendations - create a free account. Your conversation will be saved exactly where we left off.
+                  </p>
+                  <button onClick={function () { setAuthModal('signup'); }} style={{
+                    background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px',
+                    padding: '10px 18px', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
+                  }}>Create free account →</button>
+                </div>
+              )}
+
+              {!atLimit && (
+                <div style={{
+                  display: 'flex', alignItems: 'flex-end', gap: '8px', background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.12)', borderRadius: '999px', padding: '6px 6px 6px 16px', marginTop: '6px',
+                }}>
+                  <i className="ti ti-sparkles" aria-hidden="true" style={{ fontSize: '14px', color: '#818cf8', marginBottom: '11px' }} />
+                  <textarea
+                    className="bd-dark-input"
+                    ref={heroInputRef}
+                    rows={1}
+                    value={input}
+                    onFocus={reclaimChatFocus}
+                    onChange={function (e) { setInput(e.target.value); }}
+                    onKeyDown={function (e) {
+                      if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); sendMessage(); }
+                    }}
+                    placeholder="Ask a follow-up question..."
+                    style={{
+                      flex: 1, border: 'none', outline: 'none', background: 'transparent', color: '#fff',
+                      fontSize: '13px', padding: '9px 0', resize: 'none', overflowY: 'auto',
+                      maxHeight: '110px', lineHeight: '1.5', fontFamily: 'inherit',
+                    }}
+                  />
+                  <button
+                    onClick={function () { sendMessage(); }}
+                    disabled={loading || !input.trim()}
+                    style={{
+                      flexShrink: 0, border: 'none', borderRadius: '999px', padding: '10px 16px', marginBottom: '1px',
+                      background: loading || !input.trim() ? 'rgba(255,255,255,0.12)' : '#2563eb',
+                      color: loading || !input.trim() ? 'rgba(255,255,255,0.4)' : '#fff',
+                      cursor: loading || !input.trim() ? 'default' : 'pointer',
+                      display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '600',
+                    }}
+                  >Ask <span aria-hidden="true">→</span></button>
+                </div>
+              )}
+
+              <div style={{ textAlign: 'center', marginTop: '18px' }}>
+                <button onClick={resetConversation} style={{
+                  display: 'block', margin: '0 auto', fontSize: '12px', color: 'rgba(255,255,255,0.4)',
+                  background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px',
+                }}>Clear conversation and start over</button>
+                <a href="#listings" style={{
+                  display: 'inline-block', marginTop: '4px', fontSize: '12px', color: 'rgba(255,255,255,0.4)', textDecoration: 'none',
+                }}>⌄ Browse listings below</a>
+              </div>
+
+              <div ref={scrollRef} />
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ===== 3. LISTINGS GRID ===== */}
+      <section id="listings" style={{
+        padding: '48px 24px', maxWidth: '1180px', margin: '0 auto', position: 'relative',
+        filter: chatHasFocus ? 'blur(3px)' : 'none',
+        opacity: chatHasFocus ? 0.35 : 1,
+        pointerEvents: chatHasFocus ? 'none' : 'auto',
+        transition: 'filter 0.3s, opacity 0.3s',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+          <h2 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)', margin: 0 }}>Businesses for sale or investment</h2>
+          <a href="#" style={{ fontSize: '13px', color: 'var(--text-accent)', textDecoration: 'none' }}>View all →</a>
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '20px' }}>
+          {DISCOVERY_CATEGORIES.map(function (cat) {
+            var active = activeCategory === cat.key;
+            return (
+              <button key={cat.label} onClick={function () { handleCategoryClick(cat); }} style={{
+                display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '999px',
+                fontSize: '12px', fontWeight: '500', cursor: 'pointer',
+                background: active ? 'var(--text-accent)' : 'var(--surface-2)',
+                color: active ? '#fff' : 'var(--text-secondary)',
+                border: active ? '1px solid var(--text-accent)' : '1px solid var(--border)',
+              }}>
+                <i className={'ti ' + cat.icon} aria-hidden="true" style={{ fontSize: '13px' }} />
+                {cat.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '16px' }}>
+          {filteredListings.map(function (l) {
+            return <ListingCard key={l.id} listing={l} onClick={handleListingClick} />;
+          })}
+        </div>
+
+        {exploring && (
+          <ListingDetailModal
+            listing={exploring}
+            onClose={function () { setExploring(null); }}
+            onSignup={function () { setExploring(null); setAuthModal('signup'); }}
+            onLogin={function () { setExploring(null); setAuthModal('signin'); }}
+            onAskAi={function () { handleAskAiAboutListing(exploring); }}
+          />
+        )}
+      </section>
+
+      {/* ===== 4. FOR SELLERS / BUYERS / CAs ===== */}
+      <ForSection />
+
+      {/* ===== 5. HOW IT WORKS ===== */}
+      <HowItWorks />
+
+      {/* ===== 6. FOR INVESTORS ===== */}
+      <ForInvestors onShowSignup={function () { setAuthModal('signup'); }} />
+
+      {/* ===== 7. PROFESSIONAL TOOLS ===== */}
+      <Tools onShowSignup={function () { setAuthModal('signup'); }} />
+
+      {/* ===== 8. PRICING ===== */}
+      <section id="pricing" style={{ padding: '52px 24px', background: 'var(--surface-1)' }}>
+        <div style={{ maxWidth: '1180px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+            <p style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-accent)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 8px' }}>BuzinessDeals pricing</p>
+            <h2 style={{ fontSize: '24px', fontWeight: '600', margin: '0 0 8px', color: 'var(--text-primary)' }}>Transparent pricing for every need</h2>
+            <p style={{ fontSize: '14px', color: 'var(--text-muted)', margin: 0 }}>Pay per engagement or subscribe for unlimited access. No hidden fees.</p>
+          </div>
+
+          <p style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 14px', paddingLeft: '4px' }}>Professional Tools</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px,1fr))', gap: '16px', marginBottom: '32px' }}>
+            {professionalTools.map(function (p) {
+              return <PricingCard key={p.id} plan={p} onSelect={function () { setAuthModal('signup'); }} />;
+            })}
+          </div>
+
+          <p style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 14px', paddingLeft: '4px' }}>Listing Packages</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px,1fr))', gap: '16px', marginBottom: '32px' }}>
+            {listingPackages.map(function (p) {
+              return <PricingCard key={p.id} plan={p} onSelect={function () { setAuthModal('signup'); }} />;
+            })}
+          </div>
+
+          <div style={{ textAlign: 'center', padding: '20px', background: 'var(--bg-accent)', borderRadius: '10px', border: '1px solid var(--border)' }}>
+            <p style={{ fontSize: '14px', color: 'var(--text-primary)', margin: '0 0 4px', fontWeight: '500' }}>Need a custom solution?</p>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '0 0 12px' }}>
+              Large transaction advisory, bulk valuations, or CA practice integration — our team will scope a plan for you.
+            </p>
+            <a href="#contact" style={{
+              display: 'inline-block', padding: '9px 24px', borderRadius: '8px', fontSize: '13px',
+              fontWeight: '500', cursor: 'pointer', background: '#2563eb', color: '#fff', textDecoration: 'none',
+            }}>Contact us →</a>
           </div>
         </div>
-      )}
-      {showDirectListing && (
-        <CreateListingModal
-          userId={user ? user.id : null}
-          hasValuationReport={false}
-          onClose={function () { setShowDirectListing(false); }}
-          onSuccess={function () { setShowDirectListing(false); setDirectListingUpsell(true); }}
-        />
-      )}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        <ConversationEngine
-          // Forces a clean remount on project switch - the chat log, its
-          // restore effect, exchangeCount, pending-action state etc. all
-          // reset from scratch rather than needing every internal piece of
-          // ConversationEngine's state hand-audited for cross-project
-          // leakage. Falls back to sessionId for the anonymous (no
-          // project) flow, unaffected by any of this.
-          key={projectId || sessionId}
-          user={user}
-          sessionId={sessionId}
-          projectId={projectId}
-          brief={brief}
-          extraction={convExtraction}
-          model={convModel}
-          convPhase={convPhase}
-          exchangeCount={0}
-          onPhaseChange={handlePhaseChange}
-          onExtraction={handleExtraction}
-          onModelComplete={handleModelComplete}
-          onBriefComplete={handleBriefComplete}
-          onAction={handleAction}
-          onReset={handleReset}
-          onGoHome={goHome}
-          injectMessage={injectMessage}
-        />
-        <RightPanel
-          convPhase={convPhase}
-          user={user}
-          sessionId={sessionId}
-          projectId={projectId}
-          sellerForm={sellerForm}
-          selEngId={selEngId}
-          convExtraction={convExtraction}
-          convModel={convModel}
-          brief={brief}
-          report={report}
-          onReportGenerated={setReport}
-          onCard={handleCard}
-          cardLoading={cardLoading}
-          onHomeFromValuation={goHome}
-          // Goes through handleProceedFromModel, NOT handlePhaseChange - this
-          // button always means "build the valuation from the model that's
-          // on screen right now", so it must always rebuild sellerForm, not
-          // defer to handlePhaseChange's cache-trusting guard. That guard
-          // (correct for a mid-chat nudge, where preserving an in-progress
-          // edit is the right default) was, until this fix, also the path
-          // this button used - so a stale-but-"complete-shaped" sellerForm
-          // already sitting in state (e.g. from a much earlier direct
-          // "Valuation Report" click before this project's AI interview had
-          // ever run) would satisfy the guard and never get rebuilt, even
-          // though the just-completed model had real, confirmed numbers.
-          // See handleProceedFromModel's own comment for the full story.
-          onProceedToValuation={handleProceedFromModel}
-          onBrowseMatched={function () { setConvPhase('listings'); }}
-          onAskAiAboutListing={handleAskAiAboutListing}
-          onSellerFormChange={setSellerForm}
-          forceBusinessPanel={forceBusinessPanel}
-          projectsList={projectsList}
-          onSwitchProject={switchProject}
-          onNewProject={createNewProject}
-          onArchiveProject={archiveProject}
-          onUnarchiveProject={unarchiveProject}
-          onRenameProject={renameProject}
-          onDeleteProject={deleteProjectPermanently}
-          autoEditProjectId={autoEditProjectId}
-          onAutoEditConsumed={function () { setAutoEditProjectId(null); }}
-          switchingProject={switchingProject}
-        />
-      </div>
+      </section>
+
+      {/* ===== 9. NEED EXPERT HELP ===== */}
+      <section id="contact" style={{ padding: '56px 24px', background: 'var(--surface-0)' }}>
+        <div style={{ maxWidth: '440px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+            <h2 style={{ fontSize: '22px', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 8px' }}>Need expert guidance?</h2>
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0, lineHeight: '1.6' }}>Our advisors help buyers find the right business and sellers get the best valuation.</p>
+          </div>
+
+          {leadSubmitted ? (
+            <div style={{
+              background: 'var(--surface-2)', borderRadius: '16px', padding: '36px 24px',
+              boxShadow: 'var(--shadow-md)', textAlign: 'center', border: '1px solid var(--border)',
+            }}>
+              <div style={{ width: '52px', height: '52px', borderRadius: '50%', background: 'var(--bg-success)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+                <i className="ti ti-check" aria-hidden="true" style={{ fontSize: '24px', color: 'var(--text-success)' }} />
+              </div>
+              <h3 style={{ fontSize: '17px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 6px' }}>Thank you!</h3>
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 18px' }}>We will call you within 24 hours.</p>
+              <button onClick={function () { setAuthModal('signup'); }} style={{
+                fontSize: '13px', fontWeight: '600', color: 'var(--text-accent)', background: 'none', border: 'none', cursor: 'pointer', padding: '8px',
+              }}>Create free account →</button>
+            </div>
+          ) : (
+            <div style={{ background: 'var(--surface-2)', borderRadius: '16px', padding: '26px', boxShadow: 'var(--shadow-md)', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '13px' }}>
+                <div>
+                  <label style={lbl}>Company name</label>
+                  <input placeholder="Your company name" value={leadForm.company_name} onChange={function (e) { handleLeadChange('company_name', e.target.value); }} style={inp} />
+                </div>
+                <div>
+                  <label style={lbl}>Contact name</label>
+                  <input placeholder="Your full name" value={leadForm.contact_name} onChange={function (e) { handleLeadChange('contact_name', e.target.value); }} style={inp} />
+                </div>
+                <div>
+                  <label style={lbl}>Mobile number</label>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ padding: '9px 12px', borderRadius: '8px', border: '1.5px solid var(--border)', background: 'var(--surface-1)', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '500' }}>+91</div>
+                    <input type="tel" placeholder="98765 43210" value={leadForm.mobile} onChange={function (e) { handleLeadChange('mobile', e.target.value); }} style={Object.assign({}, inp, { flex: 1 })} />
+                  </div>
+                </div>
+                <div>
+                  <label style={lbl}>Work email</label>
+                  <input type="email" placeholder="you@company.com" value={leadForm.email} onChange={function (e) { handleLeadChange('email', e.target.value); }} style={inp} />
+                </div>
+                <div>
+                  <label style={lbl}>What do you need?</label>
+                  <select value={leadForm.requirement} onChange={function (e) { handleLeadChange('requirement', e.target.value); }} style={inp}>
+                    <option value="">Select an option</option>
+                    <option value="I want to sell my business">I want to sell my business</option>
+                    <option value="I want to buy a business">I want to buy a business</option>
+                    <option value="I need a valuation report">I need a valuation report</option>
+                    <option value="I want to list for funding">I want to list for funding</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <button onClick={handleLeadSubmit} disabled={leadSubmitting} style={{
+                  width: '100%', padding: '12px', borderRadius: '8px', fontSize: '14px', fontWeight: '600',
+                  cursor: leadSubmitting ? 'default' : 'pointer', background: '#2563eb', color: '#fff', border: 'none',
+                  opacity: leadSubmitting ? 0.7 : 1,
+                }}>{leadSubmitting ? 'Sending...' : 'Get a call back →'}</button>
+              </div>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '16px', marginBottom: '4px' }}>Or create a free account to get started instantly</p>
+              <button onClick={function () { setAuthModal('signup'); }} style={{
+                display: 'block', margin: '0 auto', fontSize: '13px', fontWeight: '600', color: 'var(--text-accent)', background: 'none', border: 'none', cursor: 'pointer',
+              }}>Create free account →</button>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ===== 10. FOOTER ===== */}
+      <Footer />
     </div>
   );
 }
