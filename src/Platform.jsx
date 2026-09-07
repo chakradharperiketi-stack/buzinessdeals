@@ -753,21 +753,38 @@ export default function Platform({ user, sessionId, onSignOut }) {
       })
       .then(function (project) {
         if (cancelled || !project) return;
-        setProjectId(project.id);
-        // Bridge the "signed in mid-chat" gap (see chat, 5 Sept 2026):
-        // App.jsx's SIGNED_IN handler transfers user_id onto this browser's
-        // anonymous ai_conversations row (matched by session_id) the
-        // moment login completes, but it never touches project_id - and
-        // the project picked/created just above comes from the `projects`
-        // table, which that anonymous row was never linked to. Left alone
-        // the two never meet: the conversation the user was mid-interview
-        // on a second ago sits in a project_id-null row forever, invisible
-        // to loadProjectData's project_id-scoped query below, and their
-        // chat reopens as a blank greeting instead of continuing. Link it
-        // to this account's active project before loading - same "don't
-        // lose a real conversation to a filing gap" principle as
-        // backfill_projects.sql. No-op (0 rows) for a normal returning
-        // login with nothing anonymous left to claim.
+        // Bridge the "signed in mid-chat" gap (see chat, 5 Sept 2026, race
+        // fixed 7 Sept 2026): App.jsx's SIGNED_IN handler transfers user_id
+        // onto this browser's anonymous ai_conversations row (matched by
+        // session_id) the moment login completes, but it never touches
+        // project_id - and the project picked/created just above comes from
+        // the `projects` table, which that anonymous row was never linked
+        // to. Left alone the two never meet: the conversation the user was
+        // mid-interview on a second ago sits in a project_id-null row
+        // forever, invisible to loadProjectData's project_id-scoped query
+        // below, and their chat reopens as a blank greeting instead of
+        // continuing. Link it to this account's active project before
+        // loading - same "don't lose a real conversation to a filing gap"
+        // principle as backfill_projects.sql. No-op (0 rows) for a normal
+        // returning login with nothing anonymous left to claim.
+        //
+        // CRITICAL ORDERING: setProjectId (below) must not fire until AFTER
+        // this update resolves. ConversationEngine is keyed on
+        // key={projectId || sessionId} - the instant setProjectId runs,
+        // React remounts it, and its restore effect fires its ONE-SHOT
+        // `.eq('project_id', projectId)` query immediately, never retrying.
+        // Setting projectId first (the original 5 Sept version of this fix)
+        // let that remount - and its query - race this update: on a fast
+        // network the SELECT could run before the UPDATE above had actually
+        // committed, find zero rows (project_id still null in the DB at
+        // that instant), and permanently show the generic greeting - even
+        // though the link succeeded microseconds later. Reproduced live and
+        // confirmed via direct DB read on 7 Sept 2026: user_id and
+        // project_id were BOTH correctly set post-hoc, proving the link
+        // itself works - the UI's query had simply already run and given up
+        // before that write landed. Awaiting the update before setProjectId
+        // guarantees the row is linked before ConversationEngine's query for
+        // it ever fires.
         return supabase.from('ai_conversations')
           .update({ project_id: project.id })
           .eq('session_id', sessionId)
@@ -778,6 +795,7 @@ export default function Platform({ user, sessionId, onSignOut }) {
       })
       .then(function (project) {
         if (cancelled || !project) return;
+        setProjectId(project.id);
         return loadProjectData(project.id);
       })
       .catch(function () {
