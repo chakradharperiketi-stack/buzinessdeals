@@ -195,6 +195,12 @@ export default function FinancialReportPreview({ report, panelCompletionPct, onR
         </Card>
       )}
 
+      {d.managementInsights && (
+        <Card title="Management insights">
+          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.7' }}>{d.managementInsights}</p>
+        </Card>
+      )}
+
       {d.industryOutlook && (
         <Card title="Industry outlook">
           <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.7' }}>{d.industryOutlook}</p>
