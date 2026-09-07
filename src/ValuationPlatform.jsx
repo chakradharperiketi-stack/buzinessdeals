@@ -1534,7 +1534,7 @@ ${f.valueUDIN?`<div>UDIN: ${f.valueUDIN}</div>`:(f.udin?`<div>UDIN: ${f.udin}</d
 </div>
 <div class="sign-right">
 <div>Date: ${vDate}</div>
-<div>Place: ${isValuer?(f.valueCity||"Place"):(f.regOffice?.split(",").slice(-2,-1)[0]?.trim()||"Place")}</div>
+<div>Place: ${isValuer?(f.valueCity||""):(f.regOffice?.split(",").slice(-2,-1)[0]?.trim()||"")}</div>
 <div style="margin-top:20pt;font-style:italic">Signature ${isValuer?"& Seal":""}</div>
 </div>
 </div>
