@@ -178,6 +178,45 @@ export function buildV3FormFromModel(extraction, computed, profile) {
   var defaults = initForm();
   var isPro = !!(profile && profile.isProfessional);
 
+  // Valuation bridge / WACC consistency (Case 2 handoff - AI Financial Model
+  // interview feeding straight into ValuationPlatform). Root-caused against
+  // the Z ab Studios review that triggered the canonicalModel.js rebuild
+  // effort (see that file's header comment): a real term-loan balance was
+  // landing in the EV-to-Equity-Value bridge ("Less: Total Debt") via the
+  // `debt` field below, while WACC's capital-structure weights - equityPct/
+  // debtPct - stayed at initForm()'s 100%/0% (all-equity) default, because
+  // nothing here ever derived them from the same debt figure. That produces
+  // an internally inconsistent report: the discount rate assumes an
+  // unlevered business while the bridge subtracts real debt from it. Fixed
+  // by deriving equityPct/debtPct, and a blended cost of debt, from the same
+  // confirmed funding figures the bridge already uses - not a new guess,
+  // just no longer silently dropped.
+  //
+  // Also folds in wcLoanUtilised, which previously never reached `debt` at
+  // all (only termLoanOutstanding did) - a business with a drawn working
+  // capital facility had that debt invisible to both the bridge and WACC.
+  var termDebtL = Math.round((fm.funding && fm.funding.termLoanOutstanding) || 0);
+  var wcDebtL = Math.round((fm.funding && fm.funding.wcLoanUtilised) || 0);
+  var totalDebtL = termDebtL + wcDebtL;
+  var ownerEquityL = Math.round((fm.funding && fm.funding.equity) || 0);
+  var capitalBaseL = totalDebtL + ownerEquityL;
+  var equityPct = capitalBaseL > 0 ? Math.round((ownerEquityL / capitalBaseL) * 100) : 100;
+  var debtPct = capitalBaseL > 0 ? (100 - equityPct) : 0;
+  var tlRate = (fm.funding && fm.funding.termLoanRate) || null;
+  var wcRate = (fm.funding && fm.funding.wcLoanRate) || null;
+  var blendedKd = totalDebtL > 0
+    ? ((termDebtL * (tlRate != null ? tlRate : 14)) + (wcDebtL * (wcRate != null ? wcRate : 14))) / totalDebtL
+    : null;
+
+  // `cash` has no source: the AI Financial Model interview's funding schema
+  // is {equity, termLoanOutstanding, termLoanRate, wcLoanUtilised,
+  // wcLoanRate} (see ai-search-v2/index.ts) - it never asks for a cash/bank
+  // balance, so there is no confirmed figure to carry across. Left at
+  // initForm()'s "0" default rather than invented; the field is directly
+  // editable in ValuationPlatform's Company section (right next to Total
+  // Debt) so a reviewing CA can enter the real balance before finalising -
+  // flagged here rather than silently guessed, per standing policy.
+
   return Object.assign({}, defaults, {
     engagementType: 'internal',
     valuationDate: new Date().toISOString().split('T')[0],
@@ -213,8 +252,11 @@ export function buildV3FormFromModel(extraction, computed, profile) {
     dpo: String((fm.workingCapital && fm.workingCapital.payableDays) || 30),
     invDays: String((fm.workingCapital && fm.workingCapital.inventoryDays) || 0),
     baseNWC: String(Math.round((computed && computed.wc.nwc) || 0) * RAW),
-    debt: String(Math.round((fm.funding && fm.funding.termLoanOutstanding) || 0) * RAW),
-    cash: String(Math.round((fm.funding && fm.funding.cash) || 0) * RAW),
+    debt: String(totalDebtL * RAW),
+    cash: '0',
+    equityPct: String(equityPct),
+    debtPct: String(debtPct),
+    costOfDebt: blendedKd != null ? blendedKd.toFixed(2) : defaults.costOfDebt,
     openingLoss: '0',
     authCapital: '1000000',
     faceValue: '10',
