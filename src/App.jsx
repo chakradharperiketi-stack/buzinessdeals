@@ -5,8 +5,13 @@ import LoginPage from './LoginPage';
 import Platform from './Platform';
 import ErrorBoundary from './ErrorBoundary';
 
-// sessionId is generated exactly once per browser and never regenerated.
-// Every component that needs it receives it as a prop from here.
+// sessionId persists per browser for as long as the current anonymous
+// visitor/account occupies it - generated once, then reused across reloads
+// and logins. handleSignOut below clears it, so the NEXT sign-up or
+// anonymous chat on this browser starts a fresh id rather than reusing one
+// a previous account already claimed (see handleSignOut's comment for the
+// bug that caused). Every component that needs it receives it as a prop
+// from here.
 function getSessionId() {
   try {
     var existing = localStorage.getItem('bd_session_id');
@@ -87,8 +92,33 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // CRITICAL: sign-out pattern. Never change this. Never use async/await here.
+  // CRITICAL: sign-out pattern. Never use async/await here (that part is
+  // unchanged and still required). One addition: clear this browser's
+  // anonymous sessionId first - see the real bug this closes below.
+  //
+  // getSessionId()'s id is meant to represent ONE anonymous visitor's chat
+  // before they have an account - the SIGNED_IN handler below claims it for
+  // whichever account signs up first, by stamping that row's user_id (once,
+  // guarded by .is('user_id', null)). That guard is exactly the problem for
+  // every account AFTER the first: since the id was never regenerated, a
+  // second account created later on this same browser reuses the SAME
+  // session id, finds its ai_conversations row already stamped with the
+  // FIRST account's user_id, and the guard correctly refuses to re-stamp it
+  // - so the second account's own anonymous chat, and every account after
+  // it, can never be found and never continues into Platform. Reproduced
+  // live on 7 Sept 2026: a brand-new signup showed the generic greeting
+  // while the row for this browser's session id was still linked to the
+  // PREVIOUS test account from the same browser. Clearing the id on sign-out
+  // starts a genuinely fresh, unclaimed anonymous chapter for whoever uses
+  // this browser next (a different account, or the same person testing
+  // again) - matching what actually happens with a shared/reused browser,
+  // instead of permanently locking that browser's handoff to whichever
+  // account happened to sign up first. A user who stays signed in never hits
+  // this path at all - their own project-linked history keeps loading via
+  // project_id exactly as before.
   function handleSignOut() {
+    try { localStorage.removeItem('bd_session_id'); } catch (err) { /* ignore */ }
+    try { localStorage.removeItem('bd_platform_state_' + sessionId); } catch (err) { /* ignore */ }
     supabase.auth.signOut().then(function () {
       window.location.reload();
     }).catch(function () {
