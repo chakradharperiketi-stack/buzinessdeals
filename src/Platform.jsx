@@ -491,19 +491,27 @@ function clearPlatformState(sessionId) {
 export default function Platform({ user, sessionId, onSignOut }) {
   var currentOwnerId = user && user.id ? user.id : null;
   var rawPersisted = loadPlatformState(sessionId);
-  // Cross-account data leak fix (see chat, 5 Sept 2026): App.jsx's sessionId
-  // is generated once per BROWSER and never regenerated, but this state is
-  // keyed only by sessionId - so on a shared browser, a second account
-  // logging in used to seed its very first render straight from whatever
-  // the FIRST account's Platform last saved here: their AI Financial Model,
-  // their in-progress valuation form, all of it. Only ever trust a saved
-  // blob when it was saved by nobody yet (ownerId null - the legitimate
-  // anonymous-chat-then-sign-up handoff App.jsx's SIGNED_IN transfer exists
-  // for) or by THIS SAME authenticated user. A different real account's
-  // leftover state is discarded outright, same as if nothing had ever been
-  // saved - the [user && user.id] effect below then repopulates everything
-  // correctly, server-side, scoped to whoever is actually logged in.
-  var persisted = (rawPersisted && (rawPersisted.ownerId == null || rawPersisted.ownerId === currentOwnerId)) ? rawPersisted : {};
+  // Cross-account data leak fix (see chat, 5 Sept 2026, tightened 7 Sept
+  // 2026): App.jsx's sessionId is generated once per BROWSER and never
+  // regenerated, but this state is keyed only by sessionId - so on a shared
+  // browser, a second account logging in used to seed its very first render
+  // straight from whatever the FIRST account's Platform last saved here:
+  // their AI Financial Model, their in-progress valuation report, all of it.
+  // Platform only ever renders once `session` exists (see App.jsx - there is
+  // no anonymous render of this component), so `currentOwnerId` is always a
+  // real account id here, never null. The original fix still trusted a
+  // blob whose ownerId was null/missing on the theory that only a genuine
+  // pre-signup anonymous save could look like that - but this component
+  // never produces one, so the only real-world source of a null/missing
+  // ownerId is a blob saved before ownerId tagging existed at all, i.e. a
+  // stale leftover from some earlier account on this browser. Grandfathering
+  // that in is exactly the leak reported again on 7 Sept 2026 ("old report
+  // getting generated in a newly created login"). Require an exact owner
+  // match, full stop - anything else (a different account, or untagged
+  // legacy data) is discarded, same as if nothing had ever been saved; the
+  // [user && user.id] effect below then repopulates everything correctly,
+  // server-side, scoped to whoever is actually logged in.
+  var persisted = (rawPersisted && rawPersisted.ownerId === currentOwnerId) ? rawPersisted : {};
   var convPhaseSt = useState(persisted.convPhase || 'discovery'), convPhase = convPhaseSt[0], setConvPhase = convPhaseSt[1];
   var convExtractionSt = useState(persisted.convExtraction || {}), convExtraction = convExtractionSt[0], setConvExtraction = convExtractionSt[1];
   var convModelSt = useState(persisted.convModel || null), convModel = convModelSt[0], setConvModel = convModelSt[1];
