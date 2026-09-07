@@ -82,6 +82,58 @@ function DriverChain({ businessModel }) {
   );
 }
 
+// NEW — driver-table wiring (in-app preview). computeModel() (server-side)
+// already computes a full 5-year, per-line-item trajectory for revenue
+// streams, direct-cost lines and opex lines - computed.years[i].driverBreakdown
+// - using each item's own confirmed/assumed growth rate where the interview
+// captured one, not a single blended rate. Until now this was computed and
+// saved but never shown in the in-app preview at all. Pure rendering of
+// figures that already exist on the report row - no new computation here.
+function DriverTable({ years, itemKey, totalKey, label }) {
+  var withDriver = (years || []).filter(function (y) { return y.driverBreakdown && Array.isArray(y.driverBreakdown[itemKey]) && y.driverBreakdown[itemKey].length; });
+  if (!withDriver.length) return null;
+  var labels = withDriver[0].driverBreakdown[itemKey].map(function (p) { return p.label; });
+  if (!labels.length) return null;
+  var fmt = function (n) { return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n || 0); };
+  return (
+    <div style={{ marginBottom: '14px', overflowX: 'auto' }}>
+      <p style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', margin: '0 0 6px', textTransform: 'uppercase', letterSpacing: '0.03em' }}>{label}</p>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid var(--border)' }}>
+            <th style={{ textAlign: 'left', padding: '5px 6px', color: 'var(--text-muted)', fontWeight: '600' }}>Line item</th>
+            {withDriver.map(function (y, i) { return <th key={i} style={{ textAlign: 'right', padding: '5px 6px', color: 'var(--text-muted)', fontWeight: '600' }}>{y.yr}</th>; })}
+          </tr>
+        </thead>
+        <tbody>
+          {labels.map(function (lbl, li) {
+            var first = withDriver[0].driverBreakdown[itemKey][li];
+            return (
+              <tr key={li} style={{ borderBottom: '1px solid var(--border)' }}>
+                <td style={{ padding: '5px 6px', color: 'var(--text-secondary)' }}>
+                  {lbl}
+                  {first && first.growthPct != null && (
+                    <span style={{ fontSize: '10px', fontStyle: 'italic', color: 'var(--text-muted)' }}> ({first.growthPct}% p.a.)</span>
+                  )}
+                </td>
+                {withDriver.map(function (y, yi) {
+                  var item = y.driverBreakdown[itemKey][li];
+                  return <td key={yi} style={{ textAlign: 'right', padding: '5px 6px', color: 'var(--text-secondary)' }}>{fmt(item ? item.value : 0)}</td>;
+                })}
+              </tr>
+            );
+          })}
+          <tr>
+            <td style={{ padding: '5px 6px', fontWeight: '600', color: 'var(--text-primary)' }}>Total</td>
+            {withDriver.map(function (y, yi) { return <td key={yi} style={{ textAlign: 'right', padding: '5px 6px', fontWeight: '600', color: 'var(--text-primary)' }}>{fmt(y[totalKey])}</td>; })}
+          </tr>
+        </tbody>
+      </table>
+      <p style={{ fontSize: '10px', color: 'var(--text-muted)', margin: '4px 0 0' }}>All figures in Rs Lakhs. Rates shown are the item's own confirmed/assumed growth rate where the interview captured one; unannotated lines use the same blended rate as the rest of this category.</p>
+    </div>
+  );
+}
+
 function ObservationRow({ label, text }) {
   if (!text) return null;
   return (
@@ -213,6 +265,16 @@ export default function FinancialReportPreview({ report, panelCompletionPct, onR
         <AssumptionTable title="Working capital" rows={assumptions.workingCapital} />
         <AssumptionTable title="Assets &amp; funding" rows={assumptions.assetsFunding} />
       </Card>
+
+      {computed && (
+        <DriverTable years={computed.years} itemKey="revenue" totalKey="rev" label="Revenue engine — 5-year trajectory by stream" />
+      )}
+      {computed && (
+        <DriverTable years={computed.years} itemKey="directCosts" totalKey="cogs" label="Cost architecture — 5-year direct cost projection by line item" />
+      )}
+      {computed && (
+        <DriverTable years={computed.years} itemKey="opex" totalKey="opex" label="Cost architecture — 5-year operating expense projection by line item" />
+      )}
 
       {!!(trendChart || marginChart || costChart) && (
         <Card title="Financial trends" accent>
