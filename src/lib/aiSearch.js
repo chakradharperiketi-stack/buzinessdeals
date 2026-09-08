@@ -25,7 +25,25 @@ const ANON_KEY = 'sb_publishable_0Xkatb8dUNbdP44AWek6Hg_Br4SNyf2';
 // ConversationEngine's existing .catch already resets state and shows a
 // message for - so a stalled request becomes a normal, retryable failure
 // instead of a silent dead end.
-const REQUEST_TIMEOUT_MS = 45000;
+//
+// Widened from 45s to 90s (8 Sept 2026) - the 45s figure was sized for
+// dead-connection detection, not for how long a legitimate, still-working
+// call can take. Root-caused live against the deployed function: a
+// finalize_financial_model-style turn measured ~40s end to end on a plain
+// fetch with no network issue at all, because ai-search-v2's agent loop
+// (runAgentLoop) makes a SECOND sequential Anthropic call whenever a tool
+// call round ends with no narration text (the "backstop" that fetches a
+// closing reply - see that function's comment) - a heavy data-tool turn
+// commonly hits exactly this case, so it pays for two full model calls, not
+// one. 45s left almost no margin below that ~40s measurement; ordinary
+// variance (a slightly longer response, a slower network hop) was enough to
+// abort a request that was actually still working and about to succeed -
+// the user sees "Something went wrong reaching the AI advisor" for a
+// perfectly healthy, just-slow turn, and depending on timing the server can
+// still finish and persist the real reply after the client already gave up
+// and showed the error. 90s keeps real margin above the measured worst case
+// while still bounding a truly dead connection to a reasonable wait.
+const REQUEST_TIMEOUT_MS = 90000;
 
 export async function callAiSearch({
   message,
