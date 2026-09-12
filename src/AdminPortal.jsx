@@ -210,10 +210,116 @@ function LeadRow({ row, onUpdated }) {
   );
 }
 
+// Pricing - the table itself, and LandingPage.jsx's public read of it,
+// both already existed live before this tab was built; this is the first
+// UI anywhere that can write to it. current_price/original_price are
+// stored as whole rupees (not paise) - matches what LandingPage.jsx
+// displays directly. create-razorpay-order reads current_price for
+// 'ai_model' and 'valuation_basic' live at checkout time (falling back to
+// a hardcoded price only if that read fails), so a price saved here takes
+// effect on the very next order - there is no separate "publish" step.
+function PricingRow({ row, onUpdated }) {
+  var savingSt = useState(false), saving = savingSt[0], setSaving = savingSt[1];
+  var errSt = useState(''), err = errSt[0], setErr = errSt[1];
+  var currentSt = useState(row.current_price == null ? '' : String(row.current_price)), current = currentSt[0], setCurrent = currentSt[1];
+  var originalSt = useState(row.original_price == null ? '' : String(row.original_price)), original = originalSt[0], setOriginal = originalSt[1];
+  var badgeSt = useState(row.badge || ''), badge = badgeSt[0], setBadge = badgeSt[1];
+  var comingSoonSt = useState(!!row.is_coming_soon), comingSoon = comingSoonSt[0], setComingSoon = comingSoonSt[1];
+
+  var dirty = current !== (row.current_price == null ? '' : String(row.current_price))
+    || original !== (row.original_price == null ? '' : String(row.original_price))
+    || badge !== (row.badge || '')
+    || comingSoon !== !!row.is_coming_soon;
+
+  function save() {
+    var currentNum = current === '' ? null : Number(current);
+    var originalNum = original === '' ? null : Number(original);
+    if (current !== '' && (Number.isNaN(currentNum) || currentNum < 0)) { setErr('Current price must be a non-negative number.'); return; }
+    if (original !== '' && (Number.isNaN(originalNum) || originalNum < 0)) { setErr('Original price must be a non-negative number.'); return; }
+    setSaving(true);
+    setErr('');
+    var patch = {
+      current_price: currentNum,
+      original_price: originalNum,
+      badge: badge || null,
+      is_coming_soon: comingSoon,
+      updated_at: new Date().toISOString(),
+    };
+    supabase.from('pricing').update(patch).eq('id', row.id).select().single()
+      .then(function (res) {
+        setSaving(false);
+        if (res.error) { setErr(res.error.message); return; }
+        onUpdated(res.data || Object.assign({}, row, patch));
+      })
+      .catch(function (e) { setSaving(false); setErr((e && e.message) || 'Update failed.'); });
+  }
+
+  function revert() {
+    setCurrent(row.current_price == null ? '' : String(row.current_price));
+    setOriginal(row.original_price == null ? '' : String(row.original_price));
+    setBadge(row.badge || '');
+    setComingSoon(!!row.is_coming_soon);
+    setErr('');
+  }
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: '10px', padding: '14px 16px', marginBottom: '10px', background: 'var(--surface-1)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', flexWrap: 'wrap' }}>
+        <div>
+          <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)' }}>{row.name || row.id}</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>{row.id}</span>
+        </div>
+        {row.subtitle && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.subtitle}</span>}
+      </div>
+
+      {err && <p style={{ fontSize: '12px', color: '#991b1b', margin: '8px 0 0' }}>{err}</p>}
+
+      <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          Current price (₹)
+          <input
+            type="number" min="0" value={current}
+            onChange={function (e) { setCurrent(e.target.value); }}
+            style={{ display: 'block', width: '110px', fontSize: '13px', padding: '6px 10px', marginTop: '3px', borderRadius: '7px', border: '1.5px solid var(--border)', boxSizing: 'border-box' }}
+          />
+        </label>
+        <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          Original price (₹)
+          <input
+            type="number" min="0" value={original}
+            onChange={function (e) { setOriginal(e.target.value); }}
+            style={{ display: 'block', width: '110px', fontSize: '13px', padding: '6px 10px', marginTop: '3px', borderRadius: '7px', border: '1.5px solid var(--border)', boxSizing: 'border-box' }}
+          />
+        </label>
+        <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          Badge
+          <input
+            value={badge}
+            onChange={function (e) { setBadge(e.target.value); }}
+            placeholder="e.g. Most popular"
+            style={{ display: 'block', width: '150px', fontSize: '13px', padding: '6px 10px', marginTop: '3px', borderRadius: '7px', border: '1.5px solid var(--border)', boxSizing: 'border-box' }}
+          />
+        </label>
+        <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px', paddingBottom: '7px' }}>
+          <input type="checkbox" checked={comingSoon} onChange={function (e) { setComingSoon(e.target.checked); }} />
+          Coming soon
+        </label>
+        {dirty && (
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button disabled={saving} onClick={save} style={actionBtnStyle('#16a34a')}>{saving ? 'Saving…' : 'Save'}</button>
+            <button disabled={saving} onClick={revert} style={actionBtnStyle('#64748b')}>Revert</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPortal({ user, onClose }) {
   var tabSt = useState('listings'), tab = tabSt[0], setTab = tabSt[1];
   var listingsSt = useState([]), listings = listingsSt[0], setListings = listingsSt[1];
   var leadsSt = useState([]), leads = leadsSt[0], setLeads = leadsSt[1];
+  var pricingSt = useState([]), pricing = pricingSt[0], setPricing = pricingSt[1];
   var loadingSt = useState(true), loading = loadingSt[0], setLoading = loadingSt[1];
   var errSt = useState(''), err = errSt[0], setErr = errSt[1];
   var filterSt = useState('pending_review'), filter = filterSt[0], setFilter = filterSt[1];
@@ -225,14 +331,16 @@ export default function AdminPortal({ user, onClose }) {
     Promise.all([
       supabase.from('listings').select('*').order('created_at', { ascending: false }).limit(200),
       supabase.from('leads').select('*').order('created_at', { ascending: false }).limit(200),
+      supabase.from('pricing').select('*').order('sort_order', { ascending: true }),
     ]).then(function (results) {
       if (cancelled) return;
-      var lr = results[0], ld = results[1];
-      if (lr.error || ld.error) {
-        setErr((lr.error && lr.error.message) || (ld.error && ld.error.message) || 'Failed to load admin data.');
+      var lr = results[0], ld = results[1], pr = results[2];
+      if (lr.error || ld.error || pr.error) {
+        setErr((lr.error && lr.error.message) || (ld.error && ld.error.message) || (pr.error && pr.error.message) || 'Failed to load admin data.');
       }
       setListings(lr.data || []);
       setLeads(ld.data || []);
+      setPricing(pr.data || []);
       setLoading(false);
     }).catch(function (e) {
       if (cancelled) return;
@@ -247,6 +355,9 @@ export default function AdminPortal({ user, onClose }) {
   }
   function handleLeadUpdated(updated) {
     setLeads(function (prev) { return prev.map(function (r) { return r.id === updated.id ? updated : r; }); });
+  }
+  function handlePricingUpdated(updated) {
+    setPricing(function (prev) { return prev.map(function (r) { return r.id === updated.id ? updated : r; }); });
   }
 
   var filteredListings = filter === 'all' ? listings : listings.filter(function (r) { return r.status === filter; });
@@ -275,6 +386,9 @@ export default function AdminPortal({ user, onClose }) {
         </button>
         <button onClick={function () { setTab('leads'); }} style={tabBtnStyle(tab === 'leads')}>
           Leads{notContactedCount > 0 ? ' (' + notContactedCount + ' new)' : ''}
+        </button>
+        <button onClick={function () { setTab('pricing'); }} style={tabBtnStyle(tab === 'pricing')}>
+          Pricing
         </button>
       </div>
 
@@ -309,6 +423,20 @@ export default function AdminPortal({ user, onClose }) {
             {leads.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No leads captured yet.</p>}
             {leads.map(function (row) {
               return <LeadRow key={row.id} row={row} onUpdated={handleLeadUpdated} />;
+            })}
+          </>
+        )}
+
+        {!loading && tab === 'pricing' && (
+          <>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 14px' }}>
+              Changes here take effect on the next Razorpay order for that item - no separate publish step.
+              The AI Financial Model unlock price and the Valuation Report price ("ai_model" and "valuation_basic" below)
+              also drive the automatic upgrade discount shown when a customer already owns the AI model.
+            </p>
+            {pricing.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No pricing rows found.</p>}
+            {pricing.map(function (row) {
+              return <PricingRow key={row.id} row={row} onUpdated={handlePricingUpdated} />;
             })}
           </>
         )}
